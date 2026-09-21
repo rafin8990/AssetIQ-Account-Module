@@ -1,36 +1,90 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# AssetIQ Accounts
 
-## Getting Started
+Next.js frontend for the AssetIQ **Accounts** module — general ledger, cash & bank, AR/AP, vouchers, budgets, fixed assets, reports, and settings.
 
-First, run the development server:
+Companion API: `assetiq-be/backend/accounts` (Express + PostgreSQL).
+
+## Stack
+
+- Next.js 16 (App Router), React 19, TypeScript
+- Tailwind CSS 4 + shadcn/ui (Radix)
+- Recharts for analytics
+- Feature-based UI with shared CRUD helpers (`features/crud`)
+
+## Quick start
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
+cd accounts
+pnpm install
 pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Modules
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+| Area | Routes |
+| --- | --- |
+| Dashboard & Analytics | `/`, `/analytics` |
+| Chart of Accounts | `/chart-of-accounts/*` |
+| Vouchers | `/vouchers/*` |
+| Transactions | `/transactions/*` |
+| Cash & Bank | `/cash-bank/*` |
+| Accounts Receivable | `/accounts-receivable/*` |
+| Accounts Payable | `/accounts-payable/*` |
+| Budget | `/budget/*` |
+| General Accounting | `/general-accounting/*` |
+| Fixed Assets | `/fixed-assets/*` |
+| Reports | `/reports/*` |
+| Approval & Audit | `/approval-audit/*` |
+| Settings | `/settings/*` |
 
-## Learn More
+## Structure
 
-To learn more about Next.js, take a look at the following resources:
+```
+accounts/
+├── app/
+│   └── (dashboard)/          → sidebar shell + module pages
+├── components/
+│   ├── layout/               → app shell, sidebar, navbar
+│   └── ui/                   → shadcn primitives
+├── config/
+│   └── navigation.ts         → sidebar tree
+├── features/
+│   ├── crud/                 → shared list/form page helpers
+│   ├── dashboard/
+│   ├── cash-bank/
+│   ├── accounts-receivable/
+│   ├── accounts-payable/
+│   ├── vouchers/
+│   ├── transactions/
+│   ├── budget/
+│   ├── general-accounting/
+│   ├── fixed-assets/
+│   ├── reports/
+│   ├── approval-audit/
+│   ├── settings/
+│   └── analytics/
+└── lib/
+    └── utils.ts
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Conventions
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+- Pages under `app/(dashboard)/...` stay thin; UI and mock data live in `features/<module>/`.
+- List/form screens reuse `features/crud` with a `CrudPageConfig` from each feature’s `configs.ts`.
+- Navigation is driven by `config/navigation.ts` — keep route paths in sync with `app/` folders.
 
-## Deploy on Vercel
+## Scripts
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+```bash
+pnpm dev      # development server
+pnpm build    # production build
+pnpm start    # serve production build
+pnpm lint     # eslint
+```
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Related
+
+- Backend: `assetiq-be/backend/accounts`
+- Main AssetIQ FE: `assetiq-fe/assetiq`
