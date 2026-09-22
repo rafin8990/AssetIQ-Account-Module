@@ -39,7 +39,7 @@ export function AppNavbar() {
   const { title, breadcrumbs } = findNavByPath(pathname);
 
   return (
-    <header className="sticky top-0 z-20 flex h-14 shrink-0 items-center gap-3 border-b border-border/70 bg-background/80 px-4 backdrop-blur-md supports-backdrop-filter:bg-background/70">
+    <header className="sticky top-0 z-20 flex h-14 shrink-0 items-center gap-3 border-b border-border/70 bg-background/80 px-4 backdrop-blur-md supports-backdrop-filter:bg-background/70 print:hidden">
       <div className="flex items-center gap-2">
         <SidebarTrigger className="-ml-1 text-muted-foreground hover:text-foreground" />
         <Separator orientation="vertical" className="mr-1 hidden h-5 sm:block" />

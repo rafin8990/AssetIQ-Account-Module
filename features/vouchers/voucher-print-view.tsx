@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Printer } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 
@@ -30,22 +30,77 @@ import {
 } from "@/components/ui/table";
 import { Separator } from "@/components/ui/separator";
 
+import { listVouchers } from "@/features/vouchers/api/vouchers";
 import {
   formatCurrency,
   formatDate,
-  vouchers,
   voucherTypeLabels,
+  type Voucher,
 } from "./data";
 
 export function VoucherPrintView() {
   const searchParams = useSearchParams();
-  const initialNo = searchParams.get("no") ?? vouchers[0]?.voucherNo ?? "";
-  const [selectedNo, setSelectedNo] = useState(initialNo);
+  const queryNo = searchParams.get("no") ?? "";
+  const [vouchers, setVouchers] = useState<Voucher[]>([]);
+  const [selectedNo, setSelectedNo] = useState(queryNo);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    void (async () => {
+      setLoading(true);
+      try {
+        const rows = await listVouchers();
+        if (cancelled) return;
+        setVouchers(rows);
+        setSelectedNo((current) => {
+          if (current && rows.some((item) => item.voucherNo === current)) {
+            return current;
+          }
+          if (queryNo && rows.some((item) => item.voucherNo === queryNo)) {
+            return queryNo;
+          }
+          return rows[0]?.voucherNo ?? "";
+        });
+        setError(null);
+      } catch (err) {
+        if (cancelled) return;
+        setError(
+          err instanceof Error ? err.message : "Failed to load vouchers"
+        );
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [queryNo]);
 
   const voucher = useMemo(
-    () => vouchers.find((item) => item.voucherNo === selectedNo) ?? vouchers[0],
-    [selectedNo]
+    () =>
+      vouchers.find((item) => item.voucherNo === selectedNo) ?? vouchers[0],
+    [selectedNo, vouchers]
   );
+
+  if (loading) {
+    return (
+      <div className="rounded-xl border border-dashed p-8 text-center text-sm text-muted-foreground">
+        Loading vouchers…
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+        {error}
+      </div>
+    );
+  }
 
   if (!voucher) {
     return (
@@ -56,7 +111,10 @@ export function VoucherPrintView() {
   }
 
   const totalDebit = voucher.lines.reduce((sum, line) => sum + line.debit, 0);
-  const totalCredit = voucher.lines.reduce((sum, line) => sum + line.credit, 0);
+  const totalCredit = voucher.lines.reduce(
+    (sum, line) => sum + line.credit,
+    0
+  );
 
   return (
     <div className="flex flex-col gap-5">

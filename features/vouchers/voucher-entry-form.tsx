@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Plus, Save, Send, Trash2 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -32,8 +32,9 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 
+import { listAccounts } from "@/features/chart-of-accounts/api/accounts";
+import { createVoucher } from "@/features/vouchers/api/vouchers";
 import {
-  accountOptions,
   formatCurrency,
   partyOptions,
   voucherTypeLabels,
@@ -42,10 +43,15 @@ import {
 
 type LineDraft = {
   id: string;
-  account: string;
+  accountId: string;
   narration: string;
   debit: string;
   credit: string;
+};
+
+type AccountOption = {
+  label: string;
+  value: string;
 };
 
 type VoucherEntryFormProps = {
@@ -56,22 +62,57 @@ type VoucherEntryFormProps = {
 function createLine(): LineDraft {
   return {
     id: crypto.randomUUID(),
-    account: "",
+    accountId: "",
     narration: "",
     debit: "",
     credit: "",
   };
 }
 
+function todayIsoDate() {
+  return new Date().toISOString().slice(0, 10);
+}
+
 export function VoucherEntryForm({ type, description }: VoucherEntryFormProps) {
-  const [date, setDate] = useState("2026-03-21");
+  const [date, setDate] = useState(todayIsoDate);
   const [reference, setReference] = useState("");
   const [party, setParty] = useState("");
-  const [fromAccount, setFromAccount] = useState("");
-  const [toAccount, setToAccount] = useState("");
+  const [fromAccountId, setFromAccountId] = useState("");
+  const [toAccountId, setToAccountId] = useState("");
   const [narration, setNarration] = useState("");
-  const [lines, setLines] = useState<LineDraft[]>([createLine(), createLine()]);
+  const [lines, setLines] = useState<LineDraft[]>([createLine()]);
+  const [accountOptions, setAccountOptions] = useState<AccountOption[]>([]);
+  const [accountsError, setAccountsError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [savedAs, setSavedAs] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    void (async () => {
+      try {
+        const accounts = await listAccounts();
+        if (cancelled) return;
+        setAccountOptions(
+          accounts.map((account) => ({
+            label: String(account.name),
+            value: String(account.id),
+          }))
+        );
+        setAccountsError(null);
+      } catch (err) {
+        if (cancelled) return;
+        setAccountsError(
+          err instanceof Error ? err.message : "Failed to load accounts"
+        );
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const totals = useMemo(() => {
     return lines.reduce(
@@ -85,7 +126,8 @@ export function VoucherEntryForm({ type, description }: VoucherEntryFormProps) {
 
   const balanced = Math.abs(totals.debit - totals.credit) < 0.001;
   const showParty = type === "payment" || type === "receipt";
-  const showTransfer = type === "payment" || type === "receipt" || type === "contra";
+  const showTransfer =
+    type === "payment" || type === "receipt" || type === "contra";
 
   function updateLine(id: string, patch: Partial<LineDraft>) {
     setLines((prev) =>
@@ -94,21 +136,62 @@ export function VoucherEntryForm({ type, description }: VoucherEntryFormProps) {
   }
 
   function removeLine(id: string) {
-    setLines((prev) => (prev.length <= 2 ? prev : prev.filter((l) => l.id !== id)));
+    setLines((prev) =>
+      prev.length <= 1 ? prev : prev.filter((line) => line.id !== id)
+    );
   }
 
-  function handleSave(status: "draft" | "pending") {
-    const prefix =
-      type === "payment"
-        ? "PV"
-        : type === "receipt"
-          ? "RV"
-          : type === "journal"
-            ? "JV"
-            : "CV";
-    setSavedAs(
-      `${prefix}-2026-${String(Math.floor(Math.random() * 90) + 10).padStart(4, "0")} (${status})`
-    );
+  async function handleSave(status: "draft" | "pending") {
+    if (!balanced || totals.debit <= 0) {
+      setSaveError("Voucher lines must be balanced with an amount greater than zero.");
+      return;
+    }
+
+    const missingAccount = lines.some((line) => !line.accountId);
+    if (missingAccount) {
+      setSaveError("Select an account for every ledger line.");
+      return;
+    }
+
+    setSaving(true);
+    setSaveError(null);
+
+    try {
+      const created = await createVoucher({
+        type,
+        date,
+        party: showParty ? party || null : null,
+        from_account_id: showTransfer && fromAccountId
+          ? Number(fromAccountId)
+          : null,
+        to_account_id: showTransfer && toAccountId
+          ? Number(toAccountId)
+          : null,
+        reference: reference.trim() || undefined,
+        narration: narration.trim() || undefined,
+        status,
+        lines: lines.map((line) => ({
+          account_id: Number(line.accountId),
+          narration: line.narration.trim() || undefined,
+          debit: Number(line.debit || 0),
+          credit: Number(line.credit || 0),
+        })),
+      });
+
+      setSavedAs(`${created.voucherNo} (${created.status})`);
+      setReference("");
+      setParty("");
+      setFromAccountId("");
+      setToAccountId("");
+      setNarration("");
+      setLines([createLine()]);
+    } catch (err) {
+      setSaveError(
+        err instanceof Error ? err.message : "Failed to save voucher"
+      );
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
@@ -126,13 +209,18 @@ export function VoucherEntryForm({ type, description }: VoucherEntryFormProps) {
           <p className="text-sm text-muted-foreground">{description}</p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button variant="outline" onClick={() => handleSave("draft")} className="gap-1.5">
+          <Button
+            variant="outline"
+            onClick={() => void handleSave("draft")}
+            disabled={saving}
+            className="gap-1.5"
+          >
             <Save className="size-4" />
             Save Draft
           </Button>
           <Button
-            onClick={() => handleSave("pending")}
-            disabled={!balanced || totals.debit <= 0}
+            onClick={() => void handleSave("pending")}
+            disabled={saving || !balanced || totals.debit <= 0}
             className="gap-1.5 shadow-sm shadow-primary/20"
           >
             <Send className="size-4" />
@@ -141,10 +229,21 @@ export function VoucherEntryForm({ type, description }: VoucherEntryFormProps) {
         </div>
       </div>
 
+      {accountsError ? (
+        <div className="rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+          {accountsError}
+        </div>
+      ) : null}
+
+      {saveError ? (
+        <div className="rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+          {saveError}
+        </div>
+      ) : null}
+
       {savedAs ? (
         <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
-          Dummy voucher saved as <span className="font-semibold">{savedAs}</span>.
-          Connect API later to persist.
+          Voucher saved as <span className="font-semibold">{savedAs}</span>.
         </div>
       ) : null}
 
@@ -194,33 +293,44 @@ export function VoucherEntryForm({ type, description }: VoucherEntryFormProps) {
           {showTransfer ? (
             <>
               <div className="grid gap-2">
-                <Label>{type === "receipt" ? "Received in" : "Paid from / Transfer from"}</Label>
+                <Label>
+                  {type === "receipt"
+                    ? "Received in"
+                    : "Paid from / Transfer from"}
+                </Label>
                 <Select
-                  value={fromAccount || undefined}
-                  onValueChange={setFromAccount}
+                  value={fromAccountId || undefined}
+                  onValueChange={setFromAccountId}
                 >
                   <SelectTrigger className="w-full">
                     <SelectValue placeholder="Select account" />
                   </SelectTrigger>
                   <SelectContent>
                     {accountOptions.map((option) => (
-                      <SelectItem key={option} value={option}>
-                        {option}
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
               </div>
               <div className="grid gap-2">
-                <Label>{type === "receipt" ? "Received from account" : "Paid to / Transfer to"}</Label>
-                <Select value={toAccount || undefined} onValueChange={setToAccount}>
+                <Label>
+                  {type === "receipt"
+                    ? "Received from account"
+                    : "Paid to / Transfer to"}
+                </Label>
+                <Select
+                  value={toAccountId || undefined}
+                  onValueChange={setToAccountId}
+                >
                   <SelectTrigger className="w-full">
                     <SelectValue placeholder="Select account" />
                   </SelectTrigger>
                   <SelectContent>
                     {accountOptions.map((option) => (
-                      <SelectItem key={option} value={option}>
-                        {option}
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -228,7 +338,14 @@ export function VoucherEntryForm({ type, description }: VoucherEntryFormProps) {
               </div>
             </>
           ) : null}
-          <div className={cn("grid gap-2", showParty || showTransfer ? "sm:col-span-2 lg:col-span-3" : "sm:col-span-2")}>
+          <div
+            className={cn(
+              "grid gap-2",
+              showParty || showTransfer
+                ? "sm:col-span-2 lg:col-span-3"
+                : "sm:col-span-2"
+            )}
+          >
             <Label htmlFor="narration">Narration</Label>
             <Textarea
               id="narration"
@@ -274,11 +391,11 @@ export function VoucherEntryForm({ type, description }: VoucherEntryFormProps) {
             <TableBody>
               {lines.map((line) => (
                 <TableRow key={line.id}>
-                  <TableCell className="pl-4 min-w-48">
+                  <TableCell className="min-w-48 pl-4">
                     <Select
-                      value={line.account || undefined}
+                      value={line.accountId || undefined}
                       onValueChange={(value) =>
-                        updateLine(line.id, { account: value })
+                        updateLine(line.id, { accountId: value })
                       }
                     >
                       <SelectTrigger className="w-full">
@@ -286,8 +403,8 @@ export function VoucherEntryForm({ type, description }: VoucherEntryFormProps) {
                       </SelectTrigger>
                       <SelectContent>
                         {accountOptions.map((option) => (
-                          <SelectItem key={option} value={option}>
-                            {option}
+                          <SelectItem key={option.value} value={option.value}>
+                            {option.label}
                           </SelectItem>
                         ))}
                       </SelectContent>

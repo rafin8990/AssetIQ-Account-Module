@@ -18,13 +18,7 @@ export type StatementSection = {
   total: number;
 };
 
-export function formatCurrency(value: number) {
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-    maximumFractionDigits: 0,
-  }).format(value);
-}
+export { formatCurrency } from "@/lib/format-currency";
 
 export const trialBalanceRows: ReportRow[] = [
   { id: "1", account: "1001 Cash in Hand", debit: 28450, credit: 0 },

@@ -289,7 +289,7 @@ export function AssetActionForm({ kind }: { kind: ActionKind }) {
               <div className="flex justify-between gap-3">
                 <span className="text-muted-foreground">Cost</span>
                 <span className="font-semibold tabular-nums">
-                  {amount ? formatCurrency(Number(amount)) : "$0"}
+                  {amount ? formatCurrency(Number(amount)) : formatCurrency(0)}
                 </span>
               </div>
             ) : null}
@@ -299,7 +299,7 @@ export function AssetActionForm({ kind }: { kind: ActionKind }) {
                 <span className="font-semibold tabular-nums">
                   {amount || proceeds
                     ? formatCurrency(Number(proceeds || 0) - Number(amount || 0))
-                    : "$0"}
+                    : formatCurrency(0)}
                 </span>
               </div>
             ) : null}
@@ -309,7 +309,7 @@ export function AssetActionForm({ kind }: { kind: ActionKind }) {
                 <span className="font-semibold tabular-nums">
                   {amount || newValue
                     ? formatCurrency(Number(newValue || 0) - Number(amount || 0))
-                    : "$0"}
+                    : formatCurrency(0)}
                 </span>
               </div>
             ) : null}

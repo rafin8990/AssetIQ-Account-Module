@@ -39,7 +39,7 @@ export const cashAccounts: MoneyAccount[] = [
     name: "Cash in Hand",
     code: "1001",
     type: "Cash",
-    currency: "USD",
+    currency: "BDT",
     openingBalance: 5000,
     currentBalance: 28450,
     status: "Active",
@@ -49,7 +49,7 @@ export const cashAccounts: MoneyAccount[] = [
     name: "Petty Cash",
     code: "1001-01",
     type: "Cash",
-    currency: "USD",
+    currency: "BDT",
     openingBalance: 1000,
     currentBalance: 680,
     status: "Active",
@@ -59,7 +59,7 @@ export const cashAccounts: MoneyAccount[] = [
     name: "Till — Front Desk",
     code: "1001-02",
     type: "Cash",
-    currency: "USD",
+    currency: "BDT",
     openingBalance: 500,
     currentBalance: 420,
     status: "Inactive",
@@ -72,7 +72,7 @@ export const bankAccounts: MoneyAccount[] = [
     name: "Bank — Operating",
     code: "1002",
     type: "Bank",
-    currency: "USD",
+    currency: "BDT",
     openingBalance: 120000,
     currentBalance: 192380,
     status: "Active",
@@ -84,7 +84,7 @@ export const bankAccounts: MoneyAccount[] = [
     name: "Bank — Payroll",
     code: "1003",
     type: "Bank",
-    currency: "USD",
+    currency: "BDT",
     openingBalance: 40000,
     currentBalance: 26500,
     status: "Active",
@@ -96,7 +96,7 @@ export const bankAccounts: MoneyAccount[] = [
     name: "Bank — Savings",
     code: "1004",
     type: "Bank",
-    currency: "USD",
+    currency: "BDT",
     openingBalance: 50000,
     currentBalance: 61200,
     status: "Active",
@@ -256,13 +256,7 @@ export const reconciliationLines: ReconciliationLine[] = [
   },
 ];
 
-export function formatCurrency(value: number) {
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-    maximumFractionDigits: 2,
-  }).format(value);
-}
+export { formatCurrency } from "@/lib/format-currency";
 
 export function formatDate(value: string) {
   return new Intl.DateTimeFormat("en-US", {

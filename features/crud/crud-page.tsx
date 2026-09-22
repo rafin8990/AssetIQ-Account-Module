@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { MoreHorizontal, Pencil, Plus, Search, Trash2 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -58,14 +58,65 @@ function rowToForm(row: CrudRow, fields: CrudField[]): Record<string, string> {
   );
 }
 
+function formToPayload(
+  form: Record<string, string>,
+  fields: CrudField[]
+): Record<string, string | number> {
+  return Object.fromEntries(
+    fields.map((field) => [
+      field.key,
+      field.type === "number" ? Number(form[field.key] || 0) : form[field.key],
+    ])
+  );
+}
+
+function formatCellValue(value: string | number | undefined): string {
+  if (value === undefined || value === null || value === "") return "—";
+  const text = String(value);
+  if (text.includes("_")) {
+    return text
+      .split("_")
+      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+      .join(" ");
+  }
+  if (!text.includes(" ") && text === text.toLowerCase()) {
+    return text.charAt(0).toUpperCase() + text.slice(1);
+  }
+  return text;
+}
+
 export function CrudPage({ config }: { config: CrudPageConfig }) {
-  const [rows, setRows] = useState<CrudRow[]>(config.initialRows);
+  const isLive = Boolean(config.api);
+  const [rows, setRows] = useState<CrudRow[]>(
+    isLive ? [] : config.initialRows
+  );
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<Record<string, string>>(
     emptyForm(config.fields)
   );
+  const [loading, setLoading] = useState(isLive);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const loadRows = useCallback(async () => {
+    if (!config.api) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await config.api.list();
+      setRows(data);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load records");
+    } finally {
+      setLoading(false);
+    }
+  }, [config.api]);
+
+  useEffect(() => {
+    void loadRows();
+  }, [loadRows]);
 
   const filteredRows = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -82,24 +133,60 @@ export function CrudPage({ config }: { config: CrudPageConfig }) {
   function openCreate() {
     setEditingId(null);
     setForm(emptyForm(config.fields));
+    setError(null);
     setOpen(true);
   }
 
   function openEdit(row: CrudRow) {
     setEditingId(row.id);
     setForm(rowToForm(row, config.fields));
+    setError(null);
     setOpen(true);
   }
 
-  function handleDelete(id: string) {
+  async function handleDelete(id: string) {
+    if (config.api) {
+      setError(null);
+      try {
+        await config.api.delete(id);
+        setRows((prev) => prev.filter((row) => row.id !== id));
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to delete");
+      }
+      return;
+    }
     setRows((prev) => prev.filter((row) => row.id !== id));
   }
 
-  function handleSave() {
+  async function handleSave() {
     const requiredMissing = config.fields.some(
       (field) => field.required !== false && !form[field.key]?.trim()
     );
     if (requiredMissing) return;
+
+    const payload = formToPayload(form, config.fields);
+
+    if (config.api) {
+      setSaving(true);
+      setError(null);
+      try {
+        if (editingId) {
+          const updated = await config.api.update(editingId, payload);
+          setRows((prev) =>
+            prev.map((row) => (row.id === editingId ? updated : row))
+          );
+        } else {
+          const created = await config.api.create(payload);
+          setRows((prev) => [created, ...prev]);
+        }
+        setOpen(false);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to save");
+      } finally {
+        setSaving(false);
+      }
+      return;
+    }
 
     if (editingId) {
       setRows((prev) =>
@@ -107,14 +194,7 @@ export function CrudPage({ config }: { config: CrudPageConfig }) {
           row.id === editingId
             ? {
                 ...row,
-                ...Object.fromEntries(
-                  config.fields.map((field) => [
-                    field.key,
-                    field.type === "number"
-                      ? Number(form[field.key] || 0)
-                      : form[field.key],
-                  ])
-                ),
+                ...payload,
               }
             : row
         )
@@ -126,14 +206,7 @@ export function CrudPage({ config }: { config: CrudPageConfig }) {
       setRows((prev) => [
         {
           id: nextId,
-          ...Object.fromEntries(
-            config.fields.map((field) => [
-              field.key,
-              field.type === "number"
-                ? Number(form[field.key] || 0)
-                : form[field.key],
-            ])
-          ),
+          ...payload,
         },
         ...prev,
       ]);
@@ -151,11 +224,21 @@ export function CrudPage({ config }: { config: CrudPageConfig }) {
           </h2>
           <p className="text-sm text-muted-foreground">{config.description}</p>
         </div>
-        <Button onClick={openCreate} className="gap-1.5 shadow-sm shadow-primary/20">
+        <Button
+          onClick={openCreate}
+          className="gap-1.5 shadow-sm shadow-primary/20"
+          disabled={loading}
+        >
           <Plus className="size-4" />
           Add {config.entityName}
         </Button>
       </div>
+
+      {error ? (
+        <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+          {error}
+        </div>
+      ) : null}
 
       <Card className="border-0 bg-card/90 shadow-sm shadow-primary/5 ring-border/60">
         <CardHeader className="border-b border-border/60 pb-4">
@@ -165,7 +248,9 @@ export function CrudPage({ config }: { config: CrudPageConfig }) {
                 {config.title} list
               </CardTitle>
               <CardDescription>
-                Dummy CRUD — create, edit, and delete locally
+                {isLive
+                  ? "Live data from Accounts API"
+                  : "Dummy CRUD — create, edit, and delete locally"}
               </CardDescription>
             </div>
             <div className="relative w-full sm:max-w-64">
@@ -193,7 +278,16 @@ export function CrudPage({ config }: { config: CrudPageConfig }) {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filteredRows.length === 0 ? (
+              {loading ? (
+                <TableRow>
+                  <TableCell
+                    colSpan={config.columns.length + 2}
+                    className="h-24 text-center text-muted-foreground"
+                  >
+                    Loading…
+                  </TableCell>
+                </TableRow>
+              ) : filteredRows.length === 0 ? (
                 <TableRow>
                   <TableCell
                     colSpan={config.columns.length + 2}
@@ -212,7 +306,7 @@ export function CrudPage({ config }: { config: CrudPageConfig }) {
                     </TableCell>
                     {config.columns.map((column) => (
                       <TableCell key={column.key} className={column.className}>
-                        {String(row[column.key] ?? "—")}
+                        {formatCellValue(row[column.key])}
                       </TableCell>
                     ))}
                     <TableCell className="pr-4 text-right">
@@ -234,7 +328,7 @@ export function CrudPage({ config }: { config: CrudPageConfig }) {
                           </DropdownMenuItem>
                           <DropdownMenuItem
                             variant="destructive"
-                            onClick={() => handleDelete(row.id)}
+                            onClick={() => void handleDelete(row.id)}
                           >
                             <Trash2 className="size-4" />
                             Delete
@@ -325,11 +419,19 @@ export function CrudPage({ config }: { config: CrudPageConfig }) {
           </div>
 
           <DialogFooter>
-            <Button variant="outline" onClick={() => setOpen(false)}>
+            <Button
+              variant="outline"
+              onClick={() => setOpen(false)}
+              disabled={saving}
+            >
               Cancel
             </Button>
-            <Button onClick={handleSave}>
-              {editingId ? "Save changes" : "Create"}
+            <Button onClick={() => void handleSave()} disabled={saving}>
+              {saving
+                ? "Saving…"
+                : editingId
+                  ? "Save changes"
+                  : "Create"}
             </Button>
           </DialogFooter>
         </DialogContent>

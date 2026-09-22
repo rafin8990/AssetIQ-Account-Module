@@ -240,7 +240,7 @@ export function CreateBudgetForm() {
             <div className="flex items-center justify-between rounded-xl bg-primary/5 px-3 py-3">
               <span className="font-medium text-primary">Amount</span>
               <span className="font-semibold text-primary tabular-nums">
-                {amount ? formatCurrency(Number(amount)) : "$0"}
+                {amount ? formatCurrency(Number(amount)) : formatCurrency(0)}
               </span>
             </div>
           </CardContent>

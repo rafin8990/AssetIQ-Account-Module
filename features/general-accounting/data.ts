@@ -321,13 +321,7 @@ export const accountingPeriods: AccountingPeriod[] = [
   },
 ];
 
-export function formatCurrency(value: number) {
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-    maximumFractionDigits: 2,
-  }).format(value);
-}
+export { formatCurrency } from "@/lib/format-currency";
 
 export function formatDate(value: string) {
   return new Intl.DateTimeFormat("en-US", {

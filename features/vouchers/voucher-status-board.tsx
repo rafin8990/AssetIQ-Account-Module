@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { CheckCircle2, Clock3, FileEdit, XCircle } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -15,9 +15,12 @@ import {
 import { cn } from "@/lib/utils";
 
 import {
+  listVouchers,
+  updateVoucherStatus,
+} from "@/features/vouchers/api/vouchers";
+import {
   formatCurrency,
-  getVouchersByStatus,
-  vouchers,
+  type Voucher,
   type VoucherStatus,
 } from "./data";
 import { VoucherListView } from "./voucher-list-view";
@@ -56,22 +59,65 @@ const tabs: {
 
 export function VoucherStatusBoard() {
   const [active, setActive] = useState<VoucherStatus>("pending");
+  const [vouchers, setVouchers] = useState<Voucher[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+
+  const loadVouchers = useCallback(async () => {
+    setLoading(true);
+    try {
+      const rows = await listVouchers();
+      setVouchers(rows);
+      setError(null);
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Failed to load vouchers"
+      );
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadVouchers();
+  }, [loadVouchers]);
 
   const counts = useMemo(
     () => ({
-      draft: getVouchersByStatus("draft").length,
-      pending: getVouchersByStatus("pending").length,
-      approved: getVouchersByStatus("approved").length,
-      rejected: getVouchersByStatus("rejected").length,
+      draft: vouchers.filter((item) => item.status === "draft").length,
+      pending: vouchers.filter((item) => item.status === "pending").length,
+      approved: vouchers.filter((item) => item.status === "approved").length,
+      rejected: vouchers.filter((item) => item.status === "rejected").length,
     }),
-    []
+    [vouchers]
   );
 
   const activeAmount = useMemo(
     () =>
-      getVouchersByStatus(active).reduce((sum, item) => sum + item.amount, 0),
-    [active]
+      vouchers
+        .filter((item) => item.status === active)
+        .reduce((sum, item) => sum + item.amount, 0),
+    [active, vouchers]
   );
+
+  async function handleStatusChange(voucher: Voucher, status: VoucherStatus) {
+    setActionError(null);
+    try {
+      const updated = await updateVoucherStatus(voucher.id, status);
+      setVouchers((prev) =>
+        prev.map((item) =>
+          String(item.id) === String(updated.id) ? { ...item, ...updated } : item
+        )
+      );
+      setActive(status);
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Failed to update voucher status";
+      setActionError(message);
+      throw err;
+    }
+  }
 
   return (
     <div className="flex flex-col gap-5">
@@ -83,6 +129,18 @@ export function VoucherStatusBoard() {
           Track voucher approval workflow across all voucher types.
         </p>
       </div>
+
+      {error ? (
+        <div className="rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+          {error}
+        </div>
+      ) : null}
+
+      {actionError ? (
+        <div className="rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+          {actionError}
+        </div>
+      ) : null}
 
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         {tabs.map((tab) => {
@@ -121,23 +179,29 @@ export function VoucherStatusBoard() {
 
       <Card className="border-0 bg-primary/5 shadow-none ring-1 ring-primary/15">
         <CardHeader className="pb-3">
-          <CardTitle className="text-base">Workflow tip</CardTitle>
+          <CardTitle className="text-base">How to approve</CardTitle>
           <CardDescription className="text-foreground/70">
-            Draft → Pending (submit) → Approved / Rejected. Approved vouchers
-            are ready for print and posting.
+            Open the <strong>Pending</strong> tab, then click{" "}
+            <strong>Approve</strong> or <strong>Reject</strong> on each row.
+            Draft vouchers can be submitted first.
           </CardDescription>
         </CardHeader>
         <CardContent className="pt-0">
           <div className="flex flex-wrap gap-2">
             <Button
+              type="button"
               size="sm"
               variant="outline"
               onClick={() => setActive("draft")}
             >
               Review drafts
             </Button>
-            <Button size="sm" onClick={() => setActive("pending")}>
-              Approve pending
+            <Button
+              type="button"
+              size="sm"
+              onClick={() => setActive("pending")}
+            >
+              Open pending queue
             </Button>
           </div>
         </CardContent>
@@ -148,6 +212,12 @@ export function VoucherStatusBoard() {
         description={`Showing ${counts[active]} of ${vouchers.length} total vouchers in ${active} status.`}
         fixedStatus={active}
         showStatusFilter={false}
+        vouchers={vouchers}
+        loading={loading}
+        error={null}
+        showWorkflowActions
+        onStatusChange={handleStatusChange}
+        onRefresh={() => void loadVouchers()}
       />
     </div>
   );

@@ -129,3 +129,40 @@
     @apply font-sans;
   }
 }
+
+@media print {
+  @page {
+    margin: 12mm;
+  }
+
+  body {
+    background: white !important;
+  }
+
+  /* Hide app chrome when printing vouchers/reports */
+  [data-slot="sidebar"],
+  [data-slot="sidebar-gap"],
+  [data-slot="sidebar-container"],
+  [data-slot="sidebar-rail"],
+  [data-sidebar="sidebar"] {
+    display: none !important;
+  }
+
+  body > div header.sticky,
+  [data-slot="sidebar-inset"] > header {
+    display: none !important;
+  }
+
+  [data-slot="sidebar-inset"],
+  main {
+    margin: 0 !important;
+    padding: 0 !important;
+    width: 100% !important;
+    max-width: none !important;
+    overflow: visible !important;
+    background: white !important;
+    box-shadow: none !important;
+    border-radius: 0 !important;
+  }
+}
+

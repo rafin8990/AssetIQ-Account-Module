@@ -114,11 +114,6 @@ export const mainNavigation: NavItem[] = [
         icon: Network,
       },
       {
-        title: "Account Codes",
-        href: "/chart-of-accounts/account-codes",
-        icon: Hash,
-      },
-      {
         title: "Opening Balance",
         href: "/chart-of-accounts/opening-balance",
         icon: Scale,

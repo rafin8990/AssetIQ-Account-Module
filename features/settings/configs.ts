@@ -6,41 +6,26 @@ export const financialYearConfig: CrudPageConfig = {
   entityName: "Financial Year",
   columns: [
     { key: "name", label: "Year" },
-    { key: "startDate", label: "Start" },
-    { key: "endDate", label: "End" },
+    { key: "start_date", label: "Start" },
+    { key: "end_date", label: "End" },
     { key: "status", label: "Status" },
   ],
   fields: [
     { key: "name", label: "Name", placeholder: "2025-2026" },
-    { key: "startDate", label: "Start date", placeholder: "YYYY-MM-DD" },
-    { key: "endDate", label: "End date", placeholder: "YYYY-MM-DD" },
+    { key: "start_date", label: "Start date", placeholder: "YYYY-MM-DD" },
+    { key: "end_date", label: "End date", placeholder: "YYYY-MM-DD" },
     {
       key: "status",
       label: "Status",
       type: "select",
       options: [
-        { label: "Active", value: "Active" },
-        { label: "Upcoming", value: "Upcoming" },
-        { label: "Closed", value: "Closed" },
+        { label: "Active", value: "active" },
+        { label: "Upcoming", value: "upcoming" },
+        { label: "Closed", value: "closed" },
       ],
     },
   ],
-  initialRows: [
-    {
-      id: "FY1",
-      name: "2025-2026",
-      startDate: "2025-04-01",
-      endDate: "2026-03-31",
-      status: "Active",
-    },
-    {
-      id: "FY2",
-      name: "2024-2025",
-      startDate: "2024-04-01",
-      endDate: "2025-03-31",
-      status: "Closed",
-    },
-  ],
+  initialRows: [],
 };
 
 export const currencyConfig: CrudPageConfig = {
@@ -51,16 +36,21 @@ export const currencyConfig: CrudPageConfig = {
     { key: "code", label: "Code" },
     { key: "name", label: "Name" },
     { key: "symbol", label: "Symbol" },
-    { key: "rate", label: "Exchange Rate", className: "text-right tabular-nums" },
-    { key: "isBase", label: "Base" },
+    {
+      key: "exchange_rate",
+      label: "Exchange Rate",
+      className: "text-right tabular-nums",
+    },
+    { key: "is_base", label: "Base" },
+    { key: "status", label: "Status" },
   ],
   fields: [
-    { key: "code", label: "Code", placeholder: "USD" },
-    { key: "name", label: "Name", placeholder: "US Dollar" },
-    { key: "symbol", label: "Symbol", placeholder: "$" },
-    { key: "rate", label: "Exchange rate", type: "number" },
+    { key: "code", label: "Code", placeholder: "BDT" },
+    { key: "name", label: "Name", placeholder: "Bangladeshi Taka" },
+    { key: "symbol", label: "Symbol", placeholder: "৳" },
+    { key: "exchange_rate", label: "Exchange rate", type: "number" },
     {
-      key: "isBase",
+      key: "is_base",
       label: "Base currency",
       type: "select",
       options: [
@@ -68,33 +58,17 @@ export const currencyConfig: CrudPageConfig = {
         { label: "No", value: "No" },
       ],
     },
-  ],
-  initialRows: [
     {
-      id: "CUR1",
-      code: "USD",
-      name: "US Dollar",
-      symbol: "$",
-      rate: 1,
-      isBase: "Yes",
-    },
-    {
-      id: "CUR2",
-      code: "BDT",
-      name: "Bangladeshi Taka",
-      symbol: "৳",
-      rate: 110.5,
-      isBase: "No",
-    },
-    {
-      id: "CUR3",
-      code: "EUR",
-      name: "Euro",
-      symbol: "€",
-      rate: 0.92,
-      isBase: "No",
+      key: "status",
+      label: "Status",
+      type: "select",
+      options: [
+        { label: "Active", value: "active" },
+        { label: "Inactive", value: "inactive" },
+      ],
     },
   ],
+  initialRows: [],
 };
 
 export const accountSettingsConfig: CrudPageConfig = {

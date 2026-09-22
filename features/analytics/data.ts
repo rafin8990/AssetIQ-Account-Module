@@ -1,10 +1,4 @@
-export function formatCurrency(value: number) {
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-    maximumFractionDigits: 0,
-  }).format(value);
-}
+export { formatCurrency } from "@/lib/format-currency";
 
 export function formatPercent(value: number) {
   return `${value > 0 ? "+" : ""}${value.toFixed(1)}%`;
@@ -162,7 +156,7 @@ export const cashPosition = [
 export const insights = [
   {
     title: "Receivables aging risk",
-    detail: "$7,800 is overdue beyond 60 days — follow up on Summit & Bright Media.",
+    detail: "৳7,800 is overdue beyond 60 days — follow up on Summit & Bright Media.",
     tone: "warning" as const,
   },
   {

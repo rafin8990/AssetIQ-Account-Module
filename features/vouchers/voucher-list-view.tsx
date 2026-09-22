@@ -1,8 +1,16 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
-import { Eye, Printer, Search } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  Check,
+  Eye,
+  Printer,
+  RefreshCw,
+  Search,
+  Send,
+  X,
+} from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -31,12 +39,13 @@ import {
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
 
+import { listVouchers } from "@/features/vouchers/api/vouchers";
 import {
   formatCurrency,
   formatDate,
-  vouchers,
   voucherStatusLabels,
   voucherTypeLabels,
+  type Voucher,
   type VoucherStatus,
   type VoucherType,
 } from "./data";
@@ -53,6 +62,15 @@ type VoucherListViewProps = {
   description?: string;
   fixedStatus?: VoucherStatus;
   showStatusFilter?: boolean;
+  vouchers?: Voucher[];
+  loading?: boolean;
+  error?: string | null;
+  showWorkflowActions?: boolean;
+  onStatusChange?: (
+    voucher: Voucher,
+    status: VoucherStatus
+  ) => Promise<void> | void;
+  onRefresh?: () => void;
 };
 
 export function VoucherListView({
@@ -60,15 +78,92 @@ export function VoucherListView({
   description = "Browse and filter all accounting vouchers.",
   fixedStatus,
   showStatusFilter = true,
+  vouchers: vouchersProp,
+  loading: loadingProp,
+  error: errorProp,
+  showWorkflowActions = false,
+  onStatusChange,
+  onRefresh,
 }: VoucherListViewProps) {
   const [query, setQuery] = useState("");
   const [typeFilter, setTypeFilter] = useState<string>("all");
-  const [statusFilter, setStatusFilter] = useState<string>(fixedStatus ?? "all");
+  const [statusFilter, setStatusFilter] = useState<string>(
+    fixedStatus ?? "all"
+  );
+  const [loadedVouchers, setLoadedVouchers] = useState<Voucher[]>([]);
+  const [loadingInternal, setLoadingInternal] = useState(vouchersProp === undefined);
+  const [errorInternal, setErrorInternal] = useState<string | null>(null);
+  const [actionId, setActionId] = useState<string | null>(null);
+
+  const fetchVouchers = useCallback(async () => {
+    if (vouchersProp !== undefined) {
+      onRefresh?.();
+      return;
+    }
+
+    setLoadingInternal(true);
+    try {
+      const rows = await listVouchers(
+        fixedStatus ? { status: fixedStatus } : undefined
+      );
+      setLoadedVouchers(rows);
+      setErrorInternal(null);
+    } catch (err) {
+      setErrorInternal(
+        err instanceof Error ? err.message : "Failed to load vouchers"
+      );
+    } finally {
+      setLoadingInternal(false);
+    }
+  }, [fixedStatus, onRefresh, vouchersProp]);
+
+  useEffect(() => {
+    if (vouchersProp !== undefined) return;
+
+    let cancelled = false;
+
+    void (async () => {
+      setLoadingInternal(true);
+      try {
+        const rows = await listVouchers(
+          fixedStatus ? { status: fixedStatus } : undefined
+        );
+        if (cancelled) return;
+        setLoadedVouchers(rows);
+        setErrorInternal(null);
+      } catch (err) {
+        if (cancelled) return;
+        setErrorInternal(
+          err instanceof Error ? err.message : "Failed to load vouchers"
+        );
+      } finally {
+        if (!cancelled) setLoadingInternal(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [fixedStatus, vouchersProp]);
+
+  useEffect(() => {
+    if (fixedStatus) {
+      setStatusFilter(fixedStatus);
+    }
+  }, [fixedStatus]);
+
+  const vouchers = vouchersProp ?? loadedVouchers;
+  const loading = loadingProp ?? loadingInternal;
+  const error = errorProp ?? errorInternal;
 
   const rows = useMemo(() => {
     return vouchers.filter((voucher) => {
       if (fixedStatus && voucher.status !== fixedStatus) return false;
-      if (!fixedStatus && statusFilter !== "all" && voucher.status !== statusFilter) {
+      if (
+        !fixedStatus &&
+        statusFilter !== "all" &&
+        voucher.status !== statusFilter
+      ) {
         return false;
       }
       if (typeFilter !== "all" && voucher.type !== typeFilter) return false;
@@ -82,21 +177,57 @@ export function VoucherListView({
         voucher.reference.toLowerCase().includes(q)
       );
     });
-  }, [fixedStatus, query, statusFilter, typeFilter]);
+  }, [fixedStatus, query, statusFilter, typeFilter, vouchers]);
+
+  async function handleStatusChange(voucher: Voucher, status: VoucherStatus) {
+    if (!onStatusChange) return;
+    setActionId(voucher.id);
+    setErrorInternal(null);
+    try {
+      await onStatusChange(voucher, status);
+    } catch (err) {
+      setErrorInternal(
+        err instanceof Error ? err.message : "Failed to update voucher status"
+      );
+      throw err;
+    } finally {
+      setActionId(null);
+    }
+  }
 
   return (
     <div className="flex flex-col gap-5">
-      <div className="flex flex-col gap-1">
-        <h2 className="text-2xl font-semibold tracking-tight">{title}</h2>
-        <p className="text-sm text-muted-foreground">{description}</p>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <div className="flex flex-col gap-1">
+          <h2 className="text-2xl font-semibold tracking-tight">{title}</h2>
+          <p className="text-sm text-muted-foreground">{description}</p>
+        </div>
+        <Button
+          variant="outline"
+          size="sm"
+          className="gap-1.5"
+          onClick={() => void fetchVouchers()}
+          disabled={loading}
+        >
+          <RefreshCw className={cn("size-3.5", loading && "animate-spin")} />
+          Refresh
+        </Button>
       </div>
+
+      {error ? (
+        <div className="rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+          {error}
+        </div>
+      ) : null}
 
       <Card className="border-0 bg-card/90 shadow-sm shadow-primary/5 ring-border/60">
         <CardHeader className="border-b border-border/60 pb-4">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div>
               <CardTitle className="text-base">Vouchers</CardTitle>
-              <CardDescription>{rows.length} record(s) shown</CardDescription>
+              <CardDescription>
+                {loading ? "Loading…" : `${rows.length} record(s) shown`}
+              </CardDescription>
             </div>
             <div className="flex flex-col gap-2 sm:flex-row">
               <div className="relative sm:w-56">
@@ -150,14 +281,25 @@ export function VoucherListView({
                 <TableHead className="pl-4">Voucher No</TableHead>
                 <TableHead>Date</TableHead>
                 <TableHead>Type</TableHead>
-                <TableHead className="hidden md:table-cell">Party / Ref</TableHead>
+                <TableHead className="hidden md:table-cell">
+                  Party / Ref
+                </TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead className="text-right">Amount</TableHead>
                 <TableHead className="pr-4 text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {rows.length === 0 ? (
+              {loading ? (
+                <TableRow>
+                  <TableCell
+                    colSpan={7}
+                    className="h-24 text-center text-muted-foreground"
+                  >
+                    Loading vouchers…
+                  </TableCell>
+                </TableRow>
+              ) : rows.length === 0 ? (
                 <TableRow>
                   <TableCell
                     colSpan={7}
@@ -203,7 +345,57 @@ export function VoucherListView({
                       {formatCurrency(voucher.amount)}
                     </TableCell>
                     <TableCell className="pr-4 text-right">
-                      <div className="flex justify-end gap-1">
+                      <div className="flex flex-wrap items-center justify-end gap-1">
+                        {showWorkflowActions && voucher.status === "draft" ? (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            disabled={actionId === voucher.id}
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              void handleStatusChange(voucher, "pending");
+                            }}
+                          >
+                            <Send className="size-3.5" />
+                            Submit
+                          </Button>
+                        ) : null}
+                        {showWorkflowActions &&
+                        voucher.status === "pending" ? (
+                          <>
+                            <Button
+                              type="button"
+                              size="sm"
+                              disabled={actionId === voucher.id}
+                              className="bg-emerald-600 text-white hover:bg-emerald-700"
+                              onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                void handleStatusChange(voucher, "approved");
+                              }}
+                            >
+                              <Check className="size-3.5" />
+                              Approve
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              disabled={actionId === voucher.id}
+                              className="border-rose-200 text-rose-700 hover:bg-rose-50"
+                              onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                void handleStatusChange(voucher, "rejected");
+                              }}
+                            >
+                              <X className="size-3.5" />
+                              Reject
+                            </Button>
+                          </>
+                        ) : null}
                         <Button variant="ghost" size="icon-sm" asChild>
                           <Link
                             href={`/vouchers/print?no=${encodeURIComponent(voucher.voucherNo)}`}
