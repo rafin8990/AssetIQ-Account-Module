@@ -1,7 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { Save, Send } from "lucide-react";
+import Link from "next/link";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Printer, Save, Send } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -24,38 +25,140 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 
 import {
-  customerInvoices,
-  customers,
-  depositAccounts,
-  formatCurrency,
-  getOutstandingInvoices,
-} from "./data";
+  createCustomerInvoicePayment,
+  listCustomerInvoices,
+  type CustomerInvoice,
+} from "@/features/accounts-receivable/api/customer-invoices";
+import { listAccounts } from "@/features/chart-of-accounts/api/accounts";
+import { formatCurrency } from "./data";
+
+type DepositAccount = {
+  id: string;
+  name: string;
+  type: string;
+};
 
 export function ReceivePaymentForm() {
+  const [invoices, setInvoices] = useState<CustomerInvoice[]>([]);
+  const [accounts, setAccounts] = useState<DepositAccount[]>([]);
   const [customer, setCustomer] = useState("");
-  const [invoiceNo, setInvoiceNo] = useState("");
+  const [invoiceId, setInvoiceId] = useState("");
   const [amount, setAmount] = useState("");
   const [depositTo, setDepositTo] = useState("");
-  const [method, setMethod] = useState("");
-  const [date, setDate] = useState("2026-03-21");
+  const [incomeAccountId, setIncomeAccountId] = useState("");
+  const [method, setMethod] = useState("Bank transfer");
+  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [reference, setReference] = useState("");
   const [notes, setNotes] = useState("");
-  const [savedAs, setSavedAs] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  const [printInvoiceNo, setPrintInvoiceNo] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
 
-  const openInvoices = useMemo(() => {
-    return getOutstandingInvoices().filter((invoice) =>
-      customer ? invoice.customer === customer : true
-    );
-  }, [customer]);
+  const loadData = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const [openInvoices, accountRows] = await Promise.all([
+        listCustomerInvoices({ outstanding: true }),
+        listAccounts(),
+      ]);
+      setInvoices(openInvoices);
+      setAccounts(
+        accountRows
+          .filter((row) => {
+            const type = String(row.type ?? "");
+            return type === "cash" || type === "bank" || type === "income";
+          })
+          .map((row) => ({
+            id: String(row.id),
+            name: String(row.name ?? ""),
+            type: String(row.type ?? ""),
+          }))
+      );
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Failed to load payment data"
+      );
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
-  const selectedInvoice = customerInvoices.find(
-    (invoice) => invoice.invoiceNo === invoiceNo
+  useEffect(() => {
+    void loadData();
+  }, [loadData]);
+
+  const customers = useMemo(() => {
+    const names = new Set(invoices.map((invoice) => invoice.customer));
+    return Array.from(names).sort();
+  }, [invoices]);
+
+  const openInvoices = useMemo(
+    () =>
+      invoices.filter((invoice) =>
+        customer ? invoice.customer === customer : true
+      ),
+    [customer, invoices]
   );
 
-  function handleSave(status: "saved" | "posted") {
-    setSavedAs(
-      `RCPT-2026-${String(Math.floor(Math.random() * 90) + 10).padStart(4, "0")} (${status})`
-    );
+  const selectedInvoice = invoices.find((invoice) => invoice.id === invoiceId);
+
+  const depositAccounts = accounts.filter(
+    (account) => account.type === "cash" || account.type === "bank"
+  );
+  const incomeAccounts = accounts.filter(
+    (account) => account.type === "income"
+  );
+
+  async function handlePost() {
+    if (!selectedInvoice) return;
+    const paymentAmount = Number(amount);
+    if (!(paymentAmount > 0)) {
+      setError("Enter a valid payment amount");
+      return;
+    }
+    if (!depositTo) {
+      setError("Select a deposit account");
+      return;
+    }
+
+    setSaving(true);
+    setError(null);
+    setMessage(null);
+    setPrintInvoiceNo(null);
+    try {
+      const result = await createCustomerInvoicePayment(selectedInvoice.id, {
+        amount: paymentAmount,
+        payment_method: method,
+        paid_at: date,
+        reference: reference || undefined,
+        remarks: notes || undefined,
+        cash_account_id: Number(depositTo),
+        income_account_id: incomeAccountId
+          ? Number(incomeAccountId)
+          : undefined,
+      });
+      const paymentInv = result.paymentInvoice;
+      setMessage(
+        paymentInv
+          ? `Payment posted. Payment invoice ${paymentInv.invoiceNo} created. Order balance ${formatCurrency(result.invoice.balance)}.`
+          : `Payment posted for ${result.invoice.invoiceNo}. Balance ${formatCurrency(result.invoice.balance)}.`
+      );
+      setPrintInvoiceNo(paymentInv?.invoiceNo ?? null);
+      setAmount("");
+      setReference("");
+      setNotes("");
+      setInvoiceId("");
+      await loadData();
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Failed to post invoice payment"
+      );
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
@@ -73,26 +176,51 @@ export function ReceivePaymentForm() {
           <Button
             variant="outline"
             className="gap-1.5"
-            onClick={() => handleSave("saved")}
+            disabled={saving || loading}
+            onClick={() => void loadData()}
           >
             <Save className="size-4" />
-            Save
+            Refresh
           </Button>
           <Button
             className="gap-1.5 shadow-sm shadow-primary/20"
-            disabled={!customer || !amount || Number(amount) <= 0 || !depositTo}
-            onClick={() => handleSave("posted")}
+            disabled={
+              saving ||
+              loading ||
+              !selectedInvoice ||
+              !amount ||
+              Number(amount) <= 0 ||
+              !depositTo
+            }
+            onClick={() => void handlePost()}
           >
             <Send className="size-4" />
-            Post Payment
+            {saving ? "Posting…" : "Post Payment"}
           </Button>
         </div>
       </div>
 
-      {savedAs ? (
+      {error ? (
+        <div className="rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+          {error}
+        </div>
+      ) : null}
+
+      {message ? (
         <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
-          Dummy receipt recorded as{" "}
-          <span className="font-semibold">{savedAs}</span>.
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span>{message}</span>
+            {printInvoiceNo ? (
+              <Button variant="outline" size="sm" className="gap-1.5" asChild>
+                <Link
+                  href={`/accounts-receivable/customer-invoices/print?no=${encodeURIComponent(printInvoiceNo)}`}
+                >
+                  <Printer className="size-3.5" />
+                  Print payment invoice
+                </Link>
+              </Button>
+            ) : null}
+          </div>
         </div>
       ) : null}
 
@@ -101,7 +229,7 @@ export function ReceivePaymentForm() {
           <CardHeader className="border-b border-border/60 pb-4">
             <CardTitle className="text-base">Payment details</CardTitle>
             <CardDescription>
-              Capture receipt against one or more open invoices
+              Capture receipt against an open customer invoice
             </CardDescription>
           </CardHeader>
           <CardContent className="grid gap-4 pt-4 sm:grid-cols-2">
@@ -111,16 +239,17 @@ export function ReceivePaymentForm() {
                 value={customer || undefined}
                 onValueChange={(value) => {
                   setCustomer(value);
-                  setInvoiceNo("");
+                  setInvoiceId("");
                 }}
+                disabled={loading}
               >
                 <SelectTrigger className="w-full">
                   <SelectValue placeholder="Select customer" />
                 </SelectTrigger>
                 <SelectContent>
-                  {customers.map((item) => (
-                    <SelectItem key={item.id} value={item.name}>
-                      {item.name}
+                  {customers.map((name) => (
+                    <SelectItem key={name} value={name}>
+                      {name}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -130,20 +259,25 @@ export function ReceivePaymentForm() {
             <div className="grid gap-2">
               <Label>Apply to invoice</Label>
               <Select
-                value={invoiceNo || undefined}
+                value={invoiceId || undefined}
                 onValueChange={(value) => {
-                  setInvoiceNo(value);
-                  const invoice = openInvoices.find((i) => i.invoiceNo === value);
+                  setInvoiceId(value);
+                  const invoice = openInvoices.find((i) => i.id === value);
                   if (invoice) setAmount(String(invoice.balance));
                 }}
+                disabled={loading}
               >
                 <SelectTrigger className="w-full">
                   <SelectValue placeholder="Select invoice" />
                 </SelectTrigger>
                 <SelectContent>
                   {openInvoices.map((invoice) => (
-                    <SelectItem key={invoice.id} value={invoice.invoiceNo}>
-                      {invoice.invoiceNo} — {formatCurrency(invoice.balance)}
+                    <SelectItem key={invoice.id} value={invoice.id}>
+                      {invoice.invoiceNo}
+                      {invoice.sourceOrderCode
+                        ? ` · ${invoice.sourceOrderCode}`
+                        : ""}{" "}
+                      — {formatCurrency(invoice.balance)}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -166,14 +300,35 @@ export function ReceivePaymentForm() {
               <Select
                 value={depositTo || undefined}
                 onValueChange={setDepositTo}
+                disabled={loading}
               >
                 <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Select account" />
+                  <SelectValue placeholder="Cash / bank account" />
                 </SelectTrigger>
                 <SelectContent>
                   {depositAccounts.map((account) => (
-                    <SelectItem key={account} value={account}>
-                      {account}
+                    <SelectItem key={account.id} value={account.id}>
+                      {account.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="grid gap-2">
+              <Label>Income account</Label>
+              <Select
+                value={incomeAccountId || undefined}
+                onValueChange={setIncomeAccountId}
+                disabled={loading}
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="Optional if already set" />
+                </SelectTrigger>
+                <SelectContent>
+                  {incomeAccounts.map((account) => (
+                    <SelectItem key={account.id} value={account.id}>
+                      {account.name}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -239,6 +394,14 @@ export function ReceivePaymentForm() {
                   <span className="text-muted-foreground">Invoice</span>
                   <span className="font-medium">{selectedInvoice.invoiceNo}</span>
                 </div>
+                {selectedInvoice.sourceOrderCode ? (
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-muted-foreground">Order</span>
+                    <span className="font-medium">
+                      {selectedInvoice.sourceOrderCode}
+                    </span>
+                  </div>
+                ) : null}
                 <div className="flex items-center justify-between text-sm">
                   <span className="text-muted-foreground">Customer</span>
                   <span className="font-medium">{selectedInvoice.customer}</span>
@@ -267,7 +430,9 @@ export function ReceivePaymentForm() {
               </>
             ) : (
               <p className="text-sm text-muted-foreground">
-                Select a customer and invoice to preview balances.
+                {loading
+                  ? "Loading outstanding invoices…"
+                  : "Select a customer and invoice to preview balances."}
               </p>
             )}
           </CardContent>

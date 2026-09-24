@@ -36,4 +36,11 @@ export type CrudPageConfig = {
   initialRows: CrudRow[];
   /** When set, CrudPage loads and mutates data via the live API. */
   api?: CrudApiAdapter;
+  /** Shown under the list title when `api` is set. */
+  apiSourceLabel?: string;
+  /** Extra row menu actions (e.g. Print). */
+  extraActions?: Array<{
+    label: string;
+    href?: (row: CrudRow) => string;
+  }>;
 };

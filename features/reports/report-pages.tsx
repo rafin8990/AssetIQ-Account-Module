@@ -1,23 +1,72 @@
+"use client";
+
+import { useEffect, useState } from "react";
+
+import type { ReportRow, StatementSection } from "./data";
 import {
-  agingRows,
-  balanceSheet,
-  budgetVsActualRows,
-  cashBankRows,
-  cashFlow,
-  expenseRows,
-  generalLedgerRows,
-  incomeRows,
-  journalRows,
-  payableRows,
-  profitLoss,
-  receivableRows,
-  trialBalanceRows,
-  vatTaxRows,
-} from "./data";
+  fetchBalanceSheet,
+  fetchCashFlow,
+  fetchGeneralLedger,
+  fetchJournal,
+  fetchProfitLoss,
+  fetchTrialBalance,
+} from "./api/financial-reports";
+import {
+  buildAgingReportRows,
+  buildCashBankReportRows,
+  buildExpenseReportRows,
+  buildIncomeReportRows,
+  buildPayableReportRows,
+  buildReceivableReportRows,
+} from "./api/operational-reports";
 import { StatementReport } from "./statement-report";
 import { TableReport } from "./table-report";
+import { useReportPeriod } from "./use-report-period";
+
+function useLiveRows(
+  loader: (fromDate: string, toDate: string) => Promise<ReportRow[]>,
+  fromDate: string,
+  toDate: string,
+  deps: unknown[] = []
+) {
+  const [rows, setRows] = useState<ReportRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      setLoading(true);
+      try {
+        const result = await loader(fromDate, toDate);
+        if (cancelled) return;
+        setRows(result);
+        setError(null);
+      } catch (err) {
+        if (cancelled) return;
+        setRows([]);
+        setError(err instanceof Error ? err.message : "Failed to load report");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fromDate, toDate, ...deps]);
+
+  return { rows, loading, error };
+}
 
 export function TrialBalanceReport() {
+  const { fromDate, toDate, setFromDate, setToDate } = useReportPeriod();
+  const { rows, loading, error } = useLiveRows(
+    fetchTrialBalance,
+    fromDate,
+    toDate
+  );
+
   return (
     <TableReport
       title="Trial Balance"
@@ -27,49 +76,167 @@ export function TrialBalanceReport() {
         { key: "debit", label: "Debit", align: "right" },
         { key: "credit", label: "Credit", align: "right" },
       ]}
-      rows={trialBalanceRows}
+      rows={rows}
       currencyKeys={["debit", "credit"]}
+      fromDate={fromDate}
+      toDate={toDate}
+      onFromDateChange={setFromDate}
+      onToDateChange={setToDate}
+      loading={loading}
+      error={error}
     />
   );
 }
 
 export function ProfitLossReport() {
+  const { fromDate, toDate, setFromDate, setToDate } = useReportPeriod();
+  const [sections, setSections] = useState<StatementSection[]>([]);
+  const [netAmount, setNetAmount] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      setLoading(true);
+      try {
+        const result = await fetchProfitLoss(fromDate, toDate);
+        if (cancelled) return;
+        setSections(result.sections);
+        setNetAmount(result.netAmount);
+        setError(null);
+      } catch (err) {
+        if (cancelled) return;
+        setSections([]);
+        setError(err instanceof Error ? err.message : "Failed to load report");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [fromDate, toDate]);
+
   return (
     <StatementReport
       title="Profit & Loss Statement"
       description="Income and expense summary for the reporting period."
-      sections={profitLoss}
+      sections={sections}
       netLabel="Net Profit"
-      netAmount={190620 - 124680}
-      footerNote="Prepared under Accrual basis · Dummy management figures"
+      netAmount={netAmount}
+      footerNote="Prepared under Accrual basis from posted vouchers"
+      fromDate={fromDate}
+      toDate={toDate}
+      onFromDateChange={setFromDate}
+      onToDateChange={setToDate}
+      loading={loading}
+      error={error}
     />
   );
 }
 
 export function BalanceSheetReport() {
+  const { fromDate, toDate, setFromDate, setToDate } = useReportPeriod();
+  const [sections, setSections] = useState<StatementSection[]>([]);
+  const [footerNote, setFooterNote] = useState<string | undefined>();
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      setLoading(true);
+      try {
+        const result = await fetchBalanceSheet(toDate);
+        if (cancelled) return;
+        setSections(result.sections);
+        setFooterNote(result.footerNote);
+        setError(null);
+      } catch (err) {
+        if (cancelled) return;
+        setSections([]);
+        setError(err instanceof Error ? err.message : "Failed to load report");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [toDate]);
+
   return (
     <StatementReport
       title="Balance Sheet"
       description="Assets, liabilities, and equity position as of period end."
-      sections={balanceSheet}
-      footerNote={`Assets ${(928830).toLocaleString()} = Liabilities + Equity ${(40130 + 888700).toLocaleString()}`}
+      sections={sections}
+      footerNote={footerNote}
+      fromDate={fromDate}
+      toDate={toDate}
+      onFromDateChange={setFromDate}
+      onToDateChange={setToDate}
+      loading={loading}
+      error={error}
     />
   );
 }
 
 export function CashFlowReport() {
+  const { fromDate, toDate, setFromDate, setToDate } = useReportPeriod();
+  const [sections, setSections] = useState<StatementSection[]>([]);
+  const [netAmount, setNetAmount] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      setLoading(true);
+      try {
+        const result = await fetchCashFlow(fromDate, toDate);
+        if (cancelled) return;
+        setSections(result.sections);
+        setNetAmount(result.netAmount);
+        setError(null);
+      } catch (err) {
+        if (cancelled) return;
+        setSections([]);
+        setError(err instanceof Error ? err.message : "Failed to load report");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [fromDate, toDate]);
+
   return (
     <StatementReport
       title="Cash Flow Statement"
       description="Cash movements from operating, investing, and financing activities."
-      sections={cashFlow}
+      sections={sections}
       netLabel="Net Change in Cash"
-      netAmount={71240 - 20500 + 2000}
+      netAmount={netAmount}
+      fromDate={fromDate}
+      toDate={toDate}
+      onFromDateChange={setFromDate}
+      onToDateChange={setToDate}
+      loading={loading}
+      error={error}
     />
   );
 }
 
 export function GeneralLedgerReport() {
+  const { fromDate, toDate, setFromDate, setToDate } = useReportPeriod();
+  const { rows, loading, error } = useLiveRows(
+    fetchGeneralLedger,
+    fromDate,
+    toDate
+  );
+
   return (
     <TableReport
       title="General Ledger"
@@ -82,13 +249,22 @@ export function GeneralLedgerReport() {
         { key: "credit", label: "Credit", align: "right" },
         { key: "balance", label: "Balance", align: "right" },
       ]}
-      rows={generalLedgerRows}
+      rows={rows}
       currencyKeys={["debit", "credit", "balance"]}
+      fromDate={fromDate}
+      toDate={toDate}
+      onFromDateChange={setFromDate}
+      onToDateChange={setToDate}
+      loading={loading}
+      error={error}
     />
   );
 }
 
 export function JournalReport() {
+  const { fromDate, toDate, setFromDate, setToDate } = useReportPeriod();
+  const { rows, loading, error } = useLiveRows(fetchJournal, fromDate, toDate);
+
   return (
     <TableReport
       title="Journal Report"
@@ -100,13 +276,26 @@ export function JournalReport() {
         { key: "debit", label: "Debit", align: "right" },
         { key: "credit", label: "Credit", align: "right" },
       ]}
-      rows={journalRows}
+      rows={rows}
       currencyKeys={["debit", "credit"]}
+      fromDate={fromDate}
+      toDate={toDate}
+      onFromDateChange={setFromDate}
+      onToDateChange={setToDate}
+      loading={loading}
+      error={error}
     />
   );
 }
 
 export function IncomeReport() {
+  const { fromDate, toDate, setFromDate, setToDate } = useReportPeriod();
+  const { rows, loading, error } = useLiveRows(
+    buildIncomeReportRows,
+    fromDate,
+    toDate
+  );
+
   return (
     <TableReport
       title="Income Report"
@@ -116,13 +305,26 @@ export function IncomeReport() {
         { key: "amount", label: "Amount", align: "right" },
         { key: "share", label: "Share", align: "right" },
       ]}
-      rows={incomeRows}
+      rows={rows}
       currencyKeys={["amount"]}
+      fromDate={fromDate}
+      toDate={toDate}
+      onFromDateChange={setFromDate}
+      onToDateChange={setToDate}
+      loading={loading}
+      error={error}
     />
   );
 }
 
 export function ExpenseReport() {
+  const { fromDate, toDate, setFromDate, setToDate } = useReportPeriod();
+  const { rows, loading, error } = useLiveRows(
+    buildExpenseReportRows,
+    fromDate,
+    toDate
+  );
+
   return (
     <TableReport
       title="Expense Report"
@@ -132,13 +334,45 @@ export function ExpenseReport() {
         { key: "amount", label: "Amount", align: "right" },
         { key: "share", label: "Share", align: "right" },
       ]}
-      rows={expenseRows}
+      rows={rows}
       currencyKeys={["amount"]}
+      fromDate={fromDate}
+      toDate={toDate}
+      onFromDateChange={setFromDate}
+      onToDateChange={setToDate}
+      loading={loading}
+      error={error}
     />
   );
 }
 
 export function ReceivableReport() {
+  const { fromDate, toDate, setFromDate, setToDate } = useReportPeriod();
+  const [rows, setRows] = useState<ReportRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      setLoading(true);
+      try {
+        const result = await buildReceivableReportRows();
+        if (cancelled) return;
+        setRows(result);
+        setError(null);
+      } catch (err) {
+        if (cancelled) return;
+        setError(err instanceof Error ? err.message : "Failed to load report");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   return (
     <TableReport
       title="Receivable Report"
@@ -149,13 +383,46 @@ export function ReceivableReport() {
         { key: "outstanding", label: "Outstanding", align: "right" },
         { key: "overdue", label: "Overdue", align: "right" },
       ]}
-      rows={receivableRows}
+      rows={rows}
       currencyKeys={["outstanding", "overdue"]}
+      fromDate={fromDate}
+      toDate={toDate}
+      onFromDateChange={setFromDate}
+      onToDateChange={setToDate}
+      showDates={false}
+      loading={loading}
+      error={error}
     />
   );
 }
 
 export function PayableReport() {
+  const { fromDate, toDate, setFromDate, setToDate } = useReportPeriod();
+  const [rows, setRows] = useState<ReportRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      setLoading(true);
+      try {
+        const result = await buildPayableReportRows();
+        if (cancelled) return;
+        setRows(result);
+        setError(null);
+      } catch (err) {
+        if (cancelled) return;
+        setError(err instanceof Error ? err.message : "Failed to load report");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   return (
     <TableReport
       title="Payable Report"
@@ -166,13 +433,46 @@ export function PayableReport() {
         { key: "outstanding", label: "Outstanding", align: "right" },
         { key: "overdue", label: "Overdue", align: "right" },
       ]}
-      rows={payableRows}
+      rows={rows}
       currencyKeys={["outstanding", "overdue"]}
+      fromDate={fromDate}
+      toDate={toDate}
+      onFromDateChange={setFromDate}
+      onToDateChange={setToDate}
+      showDates={false}
+      loading={loading}
+      error={error}
     />
   );
 }
 
 export function AgingReport() {
+  const { fromDate, toDate, setFromDate, setToDate } = useReportPeriod();
+  const [rows, setRows] = useState<ReportRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      setLoading(true);
+      try {
+        const result = await buildAgingReportRows();
+        if (cancelled) return;
+        setRows(result);
+        setError(null);
+      } catch (err) {
+        if (cancelled) return;
+        setError(err instanceof Error ? err.message : "Failed to load report");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   return (
     <TableReport
       title="Aging Reports"
@@ -186,13 +486,27 @@ export function AgingReport() {
         { key: "d90", label: "61-90+", align: "right" },
         { key: "total", label: "Total", align: "right" },
       ]}
-      rows={agingRows}
+      rows={rows}
       currencyKeys={["current", "d30", "d60", "d90", "total"]}
+      fromDate={fromDate}
+      toDate={toDate}
+      onFromDateChange={setFromDate}
+      onToDateChange={setToDate}
+      showDates={false}
+      loading={loading}
+      error={error}
     />
   );
 }
 
 export function CashBankReport() {
+  const { fromDate, toDate, setFromDate, setToDate } = useReportPeriod();
+  const { rows, loading, error } = useLiveRows(
+    buildCashBankReportRows,
+    fromDate,
+    toDate
+  );
+
   return (
     <TableReport
       title="Cash / Bank Report"
@@ -204,13 +518,21 @@ export function CashBankReport() {
         { key: "outflows", label: "Outflows", align: "right" },
         { key: "closing", label: "Closing", align: "right" },
       ]}
-      rows={cashBankRows}
+      rows={rows}
       currencyKeys={["opening", "inflows", "outflows", "closing"]}
+      fromDate={fromDate}
+      toDate={toDate}
+      onFromDateChange={setFromDate}
+      onToDateChange={setToDate}
+      loading={loading}
+      error={error}
     />
   );
 }
 
 export function VatTaxReport() {
+  const { fromDate, toDate, setFromDate, setToDate } = useReportPeriod();
+
   return (
     <TableReport
       title="VAT & Tax Report"
@@ -221,13 +543,21 @@ export function VatTaxReport() {
         { key: "rate", label: "Rate", align: "right" },
         { key: "tax", label: "Tax", align: "right" },
       ]}
-      rows={vatTaxRows}
+      rows={[]}
       currencyKeys={["taxable", "tax"]}
+      fromDate={fromDate}
+      toDate={toDate}
+      onFromDateChange={setFromDate}
+      onToDateChange={setToDate}
+      dataBadge="Not connected"
+      emptyMessage="VAT/tax module is not connected yet. This report will populate once tax fields are available on invoices and bills."
     />
   );
 }
 
 export function BudgetVsActualReport() {
+  const { fromDate, toDate, setFromDate, setToDate } = useReportPeriod();
+
   return (
     <TableReport
       title="Budget vs Actual"
@@ -238,8 +568,14 @@ export function BudgetVsActualReport() {
         { key: "actual", label: "Actual", align: "right" },
         { key: "variance", label: "Variance", align: "right" },
       ]}
-      rows={budgetVsActualRows}
+      rows={[]}
       currencyKeys={["budget", "actual", "variance"]}
+      fromDate={fromDate}
+      toDate={toDate}
+      onFromDateChange={setFromDate}
+      onToDateChange={setToDate}
+      dataBadge="Not connected"
+      emptyMessage="Budget module is not connected yet. This report will populate once budgets are available in Accounts."
     />
   );
 }

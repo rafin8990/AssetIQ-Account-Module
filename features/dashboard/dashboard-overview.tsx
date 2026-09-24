@@ -1,3 +1,11 @@
+"use client";
+
+import { useEffect, useState } from "react";
+
+import {
+  loadDashboardData,
+  type DashboardData,
+} from "@/features/dashboard/api/dashboard";
 import {
   CashFlowChart,
   IncomeExpenseChart,
@@ -7,7 +15,46 @@ import { ExpenseBreakdownChart } from "@/features/dashboard/expense-breakdown-ch
 import { RecentTransactions } from "@/features/dashboard/recent-transactions";
 import { UpcomingPayments } from "@/features/dashboard/upcoming-payments";
 
+const emptyData: DashboardData = {
+  kpis: [],
+  monthlyIncomeExpense: [],
+  cashFlowTrend: [],
+  expenseBreakdown: [],
+  recentTransactions: [],
+  upcomingPayments: [],
+};
+
 export function DashboardOverview() {
+  const [data, setData] = useState<DashboardData>(emptyData);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    void (async () => {
+      setLoading(true);
+      try {
+        const result = await loadDashboardData();
+        if (cancelled) return;
+        setData(result);
+        setError(null);
+      } catch (err) {
+        if (cancelled) return;
+        setData(emptyData);
+        setError(
+          err instanceof Error ? err.message : "Failed to load dashboard"
+        );
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-col gap-1">
@@ -19,25 +66,40 @@ export function DashboardOverview() {
         </p>
       </div>
 
-      <DashboardKpis />
+      {error ? (
+        <div className="rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+          {error}
+        </div>
+      ) : null}
+
+      <DashboardKpis metrics={data.kpis} loading={loading} />
 
       <div className="grid gap-4 xl:grid-cols-5">
         <div className="xl:col-span-3">
-          <IncomeExpenseChart />
+          <IncomeExpenseChart
+            data={data.monthlyIncomeExpense}
+            loading={loading}
+          />
         </div>
         <div className="xl:col-span-2">
-          <ExpenseBreakdownChart />
+          <ExpenseBreakdownChart
+            data={data.expenseBreakdown}
+            loading={loading}
+          />
         </div>
       </div>
 
-      <CashFlowChart />
+      <CashFlowChart data={data.cashFlowTrend} loading={loading} />
 
       <div className="grid gap-4 xl:grid-cols-5">
         <div className="xl:col-span-3">
-          <RecentTransactions />
+          <RecentTransactions
+            items={data.recentTransactions}
+            loading={loading}
+          />
         </div>
         <div className="xl:col-span-2">
-          <UpcomingPayments />
+          <UpcomingPayments items={data.upcomingPayments} loading={loading} />
         </div>
       </div>
     </div>

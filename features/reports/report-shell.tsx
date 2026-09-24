@@ -1,6 +1,5 @@
 "use client";
 
-import { useState } from "react";
 import { Download, Printer } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -20,6 +19,16 @@ type ReportShellProps = {
   description: string;
   children: React.ReactNode;
   badge?: string;
+  dataBadge?: string;
+  fromDate?: string;
+  toDate?: string;
+  onFromDateChange?: (value: string) => void;
+  onToDateChange?: (value: string) => void;
+  showDates?: boolean;
+  loading?: boolean;
+  error?: string | null;
+  emptyMessage?: string;
+  isEmpty?: boolean;
 };
 
 export function ReportShell({
@@ -27,9 +36,19 @@ export function ReportShell({
   description,
   children,
   badge = "Management Report",
+  dataBadge = "Live data",
+  fromDate,
+  toDate,
+  onFromDateChange,
+  onToDateChange,
+  showDates = true,
+  loading = false,
+  error = null,
+  emptyMessage = "No data for the selected period.",
+  isEmpty = false,
 }: ReportShellProps) {
-  const [fromDate, setFromDate] = useState("2026-01-01");
-  const [toDate, setToDate] = useState("2026-03-21");
+  const periodLabel =
+    fromDate && toDate ? `Period ${fromDate} to ${toDate}` : "Selected period";
 
   return (
     <div className="flex flex-col gap-5">
@@ -42,30 +61,34 @@ export function ReportShell({
           <p className="text-sm text-muted-foreground">{description}</p>
         </div>
         <div className="flex flex-wrap items-end gap-2">
-          <div className="grid gap-1">
-            <Label htmlFor="from" className="text-xs">
-              From
-            </Label>
-            <Input
-              id="from"
-              type="date"
-              className="h-8 w-36"
-              value={fromDate}
-              onChange={(e) => setFromDate(e.target.value)}
-            />
-          </div>
-          <div className="grid gap-1">
-            <Label htmlFor="to" className="text-xs">
-              To
-            </Label>
-            <Input
-              id="to"
-              type="date"
-              className="h-8 w-36"
-              value={toDate}
-              onChange={(e) => setToDate(e.target.value)}
-            />
-          </div>
+          {showDates && fromDate != null && toDate != null ? (
+            <>
+              <div className="grid gap-1">
+                <Label htmlFor="from" className="text-xs">
+                  From
+                </Label>
+                <Input
+                  id="from"
+                  type="date"
+                  className="h-8 w-36"
+                  value={fromDate}
+                  onChange={(e) => onFromDateChange?.(e.target.value)}
+                />
+              </div>
+              <div className="grid gap-1">
+                <Label htmlFor="to" className="text-xs">
+                  To
+                </Label>
+                <Input
+                  id="to"
+                  type="date"
+                  className="h-8 w-36"
+                  value={toDate}
+                  onChange={(e) => onToDateChange?.(e.target.value)}
+                />
+              </div>
+            </>
+          ) : null}
           <Button
             variant="outline"
             size="sm"
@@ -75,7 +98,12 @@ export function ReportShell({
             <Printer className="size-3.5" />
             Print
           </Button>
-          <Button size="sm" className="gap-1.5 shadow-sm shadow-primary/20">
+          <Button
+            size="sm"
+            className="gap-1.5 shadow-sm shadow-primary/20"
+            disabled
+            title="Export coming soon"
+          >
             <Download className="size-3.5" />
             Export
           </Button>
@@ -88,15 +116,31 @@ export function ReportShell({
             <div>
               <CardTitle className="text-base">{title}</CardTitle>
               <CardDescription>
-                Period {fromDate} to {toDate} · AssetIQ Accounts
+                {periodLabel} · AssetIQ Accounts
               </CardDescription>
             </div>
             <Badge variant="secondary" className="hidden sm:inline-flex">
-              Dummy data
+              {dataBadge}
             </Badge>
           </div>
         </CardHeader>
-        <CardContent className="pt-4">{children}</CardContent>
+        <CardContent className="pt-4">
+          {error ? (
+            <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+              {error}
+            </div>
+          ) : loading ? (
+            <p className="py-10 text-center text-sm text-muted-foreground">
+              Loading report…
+            </p>
+          ) : isEmpty ? (
+            <p className="py-10 text-center text-sm text-muted-foreground">
+              {emptyMessage}
+            </p>
+          ) : (
+            children
+          )}
+        </CardContent>
       </Card>
     </div>
   );

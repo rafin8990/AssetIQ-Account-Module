@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Printer, Save, Send } from "lucide-react";
+import { Printer, Save, Send, Trash2 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -34,9 +34,15 @@ import { Textarea } from "@/components/ui/textarea";
 
 import { listAccounts } from "@/features/chart-of-accounts/api/accounts";
 import {
+  listReceiptParties,
+  type PartyOption,
+} from "@/features/parties/api/parties";
+import {
   addIncomePayment,
   createIncomeEntry,
+  deleteIncomePayment,
   formatIncomeCurrency,
+  getIncomeEntry,
   listIncomeEntries,
   postIncomeEntry,
   type IncomeEntry,
@@ -59,17 +65,20 @@ export function IncomeEntryView() {
   const [cashAccountId, setCashAccountId] = useState("");
   const [incomeAccountId, setIncomeAccountId] = useState("");
   const [party, setParty] = useState("");
+  const [customerCode, setCustomerCode] = useState("");
   const [method, setMethod] = useState("Cash");
   const [reference, setReference] = useState("");
   const [narration, setNarration] = useState("");
   const [cashOptions, setCashOptions] = useState<AccountOption[]>([]);
   const [incomeOptions, setIncomeOptions] = useState<AccountOption[]>([]);
+  const [partyOptions, setPartyOptions] = useState<PartyOption[]>([]);
   const [entries, setEntries] = useState<IncomeEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [savedAs, setSavedAs] = useState<string | null>(null);
   const [paymentEntryId, setPaymentEntryId] = useState<string | null>(null);
+  const [paymentDetail, setPaymentDetail] = useState<IncomeEntry | null>(null);
   const [paymentAmount, setPaymentAmount] = useState("");
   const [paymentMethod, setPaymentMethod] = useState("Cash");
   const [paymentBusy, setPaymentBusy] = useState(false);
@@ -90,34 +99,95 @@ export function IncomeEntryView() {
 
     void (async () => {
       setLoading(true);
-      try {
-        const accounts = await listAccounts();
-        if (cancelled) return;
-        const mapped = accounts.map((account) => ({
-          label: `${account.name} (${account.code})`,
-          value: String(account.id),
-          type: String(account.type ?? ""),
-        }));
+      const [accountsResult, partiesResult, entriesResult] =
+        await Promise.allSettled([
+          listAccounts(),
+          listReceiptParties(),
+          listIncomeEntries(),
+        ]);
+
+      if (cancelled) return;
+
+      const errors: string[] = [];
+
+      if (accountsResult.status === "fulfilled") {
+        const mapped = accountsResult.value
+          .filter((account) => String(account.status ?? "active") === "active")
+          .map((account) => ({
+            label: account.code
+              ? `${account.name} (${account.code})`
+              : String(account.name),
+            value: String(account.id),
+            type: String(account.type ?? ""),
+          }));
         setCashOptions(
-          mapped.filter(
-            (item) => item.type === "cash" || item.type === "bank"
-          )
+          mapped.filter((item) => item.type === "cash" || item.type === "bank")
         );
         setIncomeOptions(mapped.filter((item) => item.type === "income"));
-        await loadEntries();
-        setError(null);
-      } catch (err) {
-        if (cancelled) return;
-        setError(err instanceof Error ? err.message : "Failed to load data");
-      } finally {
-        if (!cancelled) setLoading(false);
+      } else {
+        errors.push(
+          accountsResult.reason instanceof Error
+            ? accountsResult.reason.message
+            : "Failed to load accounts"
+        );
+      }
+
+      if (partiesResult.status === "fulfilled") {
+        setPartyOptions(partiesResult.value);
+      } else {
+        setPartyOptions([]);
+        errors.push(
+          partiesResult.reason instanceof Error
+            ? partiesResult.reason.message
+            : "Failed to load customers"
+        );
+      }
+
+      if (entriesResult.status === "fulfilled") {
+        setEntries(entriesResult.value);
+      } else {
+        errors.push(
+          entriesResult.reason instanceof Error
+            ? entriesResult.reason.message
+            : "Failed to load income entries"
+        );
+      }
+
+      setError(errors.length ? errors.join(" · ") : null);
+      setLoading(false);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!paymentEntryId) {
+      setPaymentDetail(null);
+      return;
+    }
+
+    let cancelled = false;
+    void (async () => {
+      try {
+        const detail = await getIncomeEntry(paymentEntryId);
+        if (!cancelled) setPaymentDetail(detail);
+      } catch {
+        if (!cancelled) setPaymentDetail(null);
       }
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [loadEntries]);
+  }, [paymentEntryId]);
+
+  function handlePartyChange(value: string) {
+    setParty(value);
+    const selected = partyOptions.find((option) => option.value === value);
+    setCustomerCode(selected?.code ?? "");
+  }
 
   async function handleSave(status: "draft" | "posted") {
     if (!amount || Number(amount) <= 0 || !cashAccountId || !incomeAccountId) {
@@ -131,6 +201,7 @@ export function IncomeEntryView() {
       const created = await createIncomeEntry({
         date,
         party: party.trim() || null,
+        customer_code: customerCode.trim() || null,
         cash_account_id: Number(cashAccountId),
         income_account_id: Number(incomeAccountId),
         amount: Number(amount),
@@ -144,6 +215,7 @@ export function IncomeEntryView() {
       setAmount("");
       setReceivedAmount("");
       setParty("");
+      setCustomerCode("");
       setReference("");
       setNarration("");
       await loadEntries();
@@ -175,15 +247,30 @@ export function IncomeEntryView() {
     setPaymentBusy(true);
     setError(null);
     try {
-      await addIncomePayment(paymentEntryId, {
+      const updated = await addIncomePayment(paymentEntryId, {
         amount: Number(paymentAmount),
         payment_method: paymentMethod,
       });
-      setPaymentEntryId(null);
+      setPaymentDetail(updated);
       setPaymentAmount("");
       await loadEntries();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to record payment");
+    } finally {
+      setPaymentBusy(false);
+    }
+  }
+
+  async function handleDeletePayment(paymentId: string) {
+    if (!paymentEntryId || !window.confirm("Delete this payment?")) return;
+    setPaymentBusy(true);
+    setError(null);
+    try {
+      const updated = await deleteIncomePayment(paymentEntryId, paymentId);
+      setPaymentDetail(updated);
+      await loadEntries();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to delete payment");
     } finally {
       setPaymentBusy(false);
     }
@@ -208,7 +295,7 @@ export function IncomeEntryView() {
           <Button
             variant="outline"
             className="gap-1.5"
-            disabled={saving}
+            disabled={saving || loading}
             onClick={() => void handleSave("draft")}
           >
             <Save className="size-4" />
@@ -218,6 +305,7 @@ export function IncomeEntryView() {
             className="gap-1.5 shadow-sm shadow-primary/20"
             disabled={
               saving ||
+              loading ||
               !amount ||
               Number(amount) <= 0 ||
               !cashAccountId ||
@@ -302,16 +390,31 @@ export function IncomeEntryView() {
               <Select
                 value={cashAccountId || undefined}
                 onValueChange={setCashAccountId}
+                disabled={loading}
               >
                 <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Select deposit account" />
+                  <SelectValue
+                    placeholder={
+                      loading
+                        ? "Loading accounts…"
+                        : cashOptions.length
+                          ? "Select deposit account"
+                          : "No cash/bank accounts"
+                    }
+                  />
                 </SelectTrigger>
                 <SelectContent>
-                  {cashOptions.map((option) => (
-                    <SelectItem key={option.value} value={option.value}>
-                      {option.label}
+                  {cashOptions.length === 0 ? (
+                    <SelectItem value="__none" disabled>
+                      No active cash/bank accounts in chart of accounts
                     </SelectItem>
-                  ))}
+                  ) : (
+                    cashOptions.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))
+                  )}
                 </SelectContent>
               </Select>
             </div>
@@ -320,27 +423,79 @@ export function IncomeEntryView() {
               <Select
                 value={incomeAccountId || undefined}
                 onValueChange={setIncomeAccountId}
+                disabled={loading}
               >
                 <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Select income account" />
+                  <SelectValue
+                    placeholder={
+                      loading
+                        ? "Loading accounts…"
+                        : incomeOptions.length
+                          ? "Select income account"
+                          : "No income accounts"
+                    }
+                  />
                 </SelectTrigger>
                 <SelectContent>
-                  {incomeOptions.map((option) => (
-                    <SelectItem key={option.value} value={option.value}>
-                      {option.label}
+                  {incomeOptions.length === 0 ? (
+                    <SelectItem value="__none" disabled>
+                      No active income accounts in chart of accounts
                     </SelectItem>
-                  ))}
+                  ) : (
+                    incomeOptions.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))
+                  )}
                 </SelectContent>
               </Select>
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="party">Party</Label>
-              <Input
-                id="party"
-                placeholder="Customer / payer"
-                value={party}
-                onChange={(e) => setParty(e.target.value)}
-              />
+              <Label>
+                Party{" "}
+                <span className="font-normal text-muted-foreground">
+                  (customers)
+                </span>
+              </Label>
+              <Select
+                value={party || undefined}
+                onValueChange={handlePartyChange}
+                disabled={loading}
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue
+                    placeholder={
+                      loading
+                        ? "Loading customers…"
+                        : partyOptions.length
+                          ? "Select customer"
+                          : "No customers found"
+                    }
+                  />
+                </SelectTrigger>
+                <SelectContent>
+                  {partyOptions.length === 0 ? (
+                    <SelectItem value="__none" disabled>
+                      No customers in AssetIQ
+                    </SelectItem>
+                  ) : (
+                    partyOptions.map((option) => (
+                      <SelectItem
+                        key={`${option.kind}-${option.code || option.value}`}
+                        value={option.value}
+                      >
+                        {option.label}
+                      </SelectItem>
+                    ))
+                  )}
+                </SelectContent>
+              </Select>
+              {customerCode ? (
+                <p className="text-xs text-muted-foreground">
+                  Customer code: {customerCode}
+                </p>
+              ) : null}
             </div>
             <div className="grid gap-2">
               <Label htmlFor="reference">Reference</Label>
@@ -429,7 +584,7 @@ export function IncomeEntryView() {
                         <span className="font-medium">{entry.entryNo}</span>
                         {entry.sourceOrderCode ? (
                           <span className="text-xs text-muted-foreground">
-                            {entry.sourceOrderCode}
+                            Order: {entry.sourceOrderCode}
                           </span>
                         ) : null}
                         <Badge variant="outline" className="w-fit capitalize">
@@ -437,7 +592,16 @@ export function IncomeEntryView() {
                         </Badge>
                       </div>
                     </TableCell>
-                    <TableCell>{entry.party || "—"}</TableCell>
+                    <TableCell>
+                      <div className="flex flex-col gap-0.5">
+                        <span>{entry.party || "—"}</span>
+                        {entry.customerCode ? (
+                          <span className="text-xs text-muted-foreground">
+                            {entry.customerCode}
+                          </span>
+                        ) : null}
+                      </div>
+                    </TableCell>
                     <TableCell className="text-right tabular-nums">
                       {formatIncomeCurrency(entry.amount)}
                     </TableCell>
@@ -469,18 +633,20 @@ export function IncomeEntryView() {
                             Post
                           </Button>
                         ) : null}
-                        {entry.pendingAmount > 0 ? (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => {
-                              setPaymentEntryId(entry.id);
-                              setPaymentAmount(String(entry.pendingAmount));
-                            }}
-                          >
-                            Payment
-                          </Button>
-                        ) : null}
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => {
+                            setPaymentEntryId(entry.id);
+                            setPaymentAmount(
+                              entry.pendingAmount > 0
+                                ? String(entry.pendingAmount)
+                                : ""
+                            );
+                          }}
+                        >
+                          Payments
+                        </Button>
                         <Button size="sm" variant="ghost" asChild>
                           <Link
                             href={`/transactions/income-print?no=${encodeURIComponent(entry.entryNo)}`}
@@ -506,47 +672,114 @@ export function IncomeEntryView() {
           )}
 
           {paymentEntryId ? (
-            <div className="mt-4 grid gap-3 rounded-xl border bg-muted/30 p-4 sm:grid-cols-3">
-              <div className="grid gap-2">
-                <Label>Payment amount</Label>
-                <Input
-                  type="number"
-                  className="tabular-nums"
-                  value={paymentAmount}
-                  onChange={(e) => setPaymentAmount(e.target.value)}
-                />
-              </div>
-              <div className="grid gap-2">
-                <Label>Method</Label>
-                <Select value={paymentMethod} onValueChange={setPaymentMethod}>
-                  <SelectTrigger className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="Cash">Cash</SelectItem>
-                    <SelectItem value="Bank">Bank</SelectItem>
-                    <SelectItem value="Card">Card</SelectItem>
-                    <SelectItem value="Transfer">Transfer</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="flex items-end gap-2">
-                <Button
-                  disabled={paymentBusy}
-                  onClick={() => void handleRecordPayment()}
-                >
-                  Record payment
-                </Button>
+            <div className="mt-4 space-y-4 rounded-xl border bg-muted/30 p-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <p className="text-sm font-medium">
+                    Payments · {paymentDetail?.entryNo ?? "…"}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    Pending{" "}
+                    {formatIncomeCurrency(paymentDetail?.pendingAmount ?? 0)}
+                  </p>
+                </div>
                 <Button
                   variant="ghost"
+                  size="sm"
                   onClick={() => {
                     setPaymentEntryId(null);
                     setPaymentAmount("");
+                    setPaymentDetail(null);
                   }}
                 >
-                  Cancel
+                  Close
                 </Button>
               </div>
+
+              {(paymentDetail?.payments?.length ?? 0) > 0 ? (
+                <div className="overflow-x-auto rounded-lg border bg-background">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Date</TableHead>
+                        <TableHead className="text-right">Amount</TableHead>
+                        <TableHead>Method</TableHead>
+                        <TableHead>Reference</TableHead>
+                        <TableHead className="text-right">Actions</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {paymentDetail?.payments?.map((payment) => (
+                        <TableRow key={payment.id}>
+                          <TableCell>
+                            {String(payment.paidAt).slice(0, 10)}
+                          </TableCell>
+                          <TableCell className="text-right tabular-nums">
+                            {formatIncomeCurrency(payment.amount)}
+                          </TableCell>
+                          <TableCell>{payment.paymentMethod}</TableCell>
+                          <TableCell>{payment.reference || "—"}</TableCell>
+                          <TableCell className="text-right">
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              disabled={paymentBusy}
+                              onClick={() =>
+                                void handleDeletePayment(payment.id)
+                              }
+                            >
+                              <Trash2 className="size-3.5 text-destructive" />
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  No payments recorded yet.
+                </p>
+              )}
+
+              {(paymentDetail?.pendingAmount ?? 0) > 0 ? (
+                <div className="grid gap-3 sm:grid-cols-3">
+                  <div className="grid gap-2">
+                    <Label>Payment amount</Label>
+                    <Input
+                      type="number"
+                      className="tabular-nums"
+                      value={paymentAmount}
+                      onChange={(e) => setPaymentAmount(e.target.value)}
+                    />
+                  </div>
+                  <div className="grid gap-2">
+                    <Label>Method</Label>
+                    <Select
+                      value={paymentMethod}
+                      onValueChange={setPaymentMethod}
+                    >
+                      <SelectTrigger className="w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="Cash">Cash</SelectItem>
+                        <SelectItem value="Bank">Bank</SelectItem>
+                        <SelectItem value="Card">Card</SelectItem>
+                        <SelectItem value="Transfer">Transfer</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="flex items-end">
+                    <Button
+                      disabled={paymentBusy}
+                      onClick={() => void handleRecordPayment()}
+                    >
+                      Record payment
+                    </Button>
+                  </div>
+                </div>
+              ) : null}
             </div>
           ) : null}
         </CardContent>

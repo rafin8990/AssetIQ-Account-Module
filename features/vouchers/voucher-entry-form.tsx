@@ -33,10 +33,14 @@ import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 
 import { listAccounts } from "@/features/chart-of-accounts/api/accounts";
+import {
+  listPaymentParties,
+  listReceiptParties,
+  type PartyOption,
+} from "@/features/parties/api/parties";
 import { createVoucher } from "@/features/vouchers/api/vouchers";
 import {
   formatCurrency,
-  partyOptions,
   voucherTypeLabels,
   type VoucherType,
 } from "./data";
@@ -52,6 +56,7 @@ type LineDraft = {
 type AccountOption = {
   label: string;
   value: string;
+  type?: string;
 };
 
 type VoucherEntryFormProps = {
@@ -73,6 +78,10 @@ function todayIsoDate() {
   return new Date().toISOString().slice(0, 10);
 }
 
+function isCashLike(type?: string) {
+  return type === "cash" || type === "bank";
+}
+
 export function VoucherEntryForm({ type, description }: VoucherEntryFormProps) {
   const [date, setDate] = useState(todayIsoDate);
   const [reference, setReference] = useState("");
@@ -82,37 +91,114 @@ export function VoucherEntryForm({ type, description }: VoucherEntryFormProps) {
   const [narration, setNarration] = useState("");
   const [lines, setLines] = useState<LineDraft[]>([createLine()]);
   const [accountOptions, setAccountOptions] = useState<AccountOption[]>([]);
+  const [partyOptions, setPartyOptions] = useState<PartyOption[]>([]);
   const [accountsError, setAccountsError] = useState<string | null>(null);
+  const [partiesError, setPartiesError] = useState<string | null>(null);
+  const [loadingOptions, setLoadingOptions] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [savedAs, setSavedAs] = useState<string | null>(null);
+
+  const showParty = type === "payment" || type === "receipt";
+  const showTransfer =
+    type === "payment" || type === "receipt" || type === "contra";
 
   useEffect(() => {
     let cancelled = false;
 
     void (async () => {
-      try {
-        const accounts = await listAccounts();
-        if (cancelled) return;
+      setLoadingOptions(true);
+      const accountsPromise = listAccounts();
+      const partiesPromise = showParty
+        ? type === "payment"
+          ? listPaymentParties()
+          : listReceiptParties()
+        : Promise.resolve([] as PartyOption[]);
+
+      const [accountsResult, partiesResult] = await Promise.allSettled([
+        accountsPromise,
+        partiesPromise,
+      ]);
+
+      if (cancelled) return;
+
+      if (accountsResult.status === "fulfilled") {
         setAccountOptions(
-          accounts.map((account) => ({
-            label: String(account.name),
+          accountsResult.value.map((account) => ({
+            label: account.code
+              ? `${account.name} (${account.code})`
+              : String(account.name),
             value: String(account.id),
+            type: String(account.type ?? ""),
           }))
         );
         setAccountsError(null);
-      } catch (err) {
-        if (cancelled) return;
+      } else {
         setAccountsError(
-          err instanceof Error ? err.message : "Failed to load accounts"
+          accountsResult.reason instanceof Error
+            ? accountsResult.reason.message
+            : "Failed to load accounts"
         );
       }
+
+      if (partiesResult.status === "fulfilled") {
+        setPartyOptions(partiesResult.value);
+        setPartiesError(null);
+      } else if (showParty) {
+        setPartyOptions([]);
+        setPartiesError(
+          partiesResult.reason instanceof Error
+            ? partiesResult.reason.message
+            : "Failed to load parties"
+        );
+      } else {
+        setPartyOptions([]);
+        setPartiesError(null);
+      }
+
+      setLoadingOptions(false);
+      setParty("");
+      setFromAccountId("");
+      setToAccountId("");
     })();
 
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [showParty, type]);
+
+  const cashAccountOptions = useMemo(
+    () => accountOptions.filter((option) => isCashLike(option.type)),
+    [accountOptions]
+  );
+
+  const fromAccountOptions = useMemo(() => {
+    if (type === "payment" || type === "receipt" || type === "contra") {
+      return cashAccountOptions.length ? cashAccountOptions : accountOptions;
+    }
+    return accountOptions;
+  }, [accountOptions, cashAccountOptions, type]);
+
+  const toAccountOptions = useMemo(() => {
+    if (type === "contra") {
+      return cashAccountOptions.length ? cashAccountOptions : accountOptions;
+    }
+    if (type === "receipt") {
+      const incomeLike = accountOptions.filter(
+        (option) =>
+          option.type === "income" || option.type === "receivable"
+      );
+      return incomeLike.length ? incomeLike : accountOptions;
+    }
+    if (type === "payment") {
+      const payableLike = accountOptions.filter(
+        (option) =>
+          option.type === "expense" || option.type === "payable"
+      );
+      return payableLike.length ? payableLike : accountOptions;
+    }
+    return accountOptions;
+  }, [accountOptions, cashAccountOptions, type]);
 
   const totals = useMemo(() => {
     return lines.reduce(
@@ -125,10 +211,6 @@ export function VoucherEntryForm({ type, description }: VoucherEntryFormProps) {
   }, [lines]);
 
   const balanced = Math.abs(totals.debit - totals.credit) < 0.001;
-  const showParty = type === "payment" || type === "receipt";
-  const showTransfer =
-    type === "payment" || type === "receipt" || type === "contra";
-
   function updateLine(id: string, patch: Partial<LineDraft>) {
     setLines((prev) =>
       prev.map((line) => (line.id === id ? { ...line, ...patch } : line))
@@ -229,9 +311,9 @@ export function VoucherEntryForm({ type, description }: VoucherEntryFormProps) {
         </div>
       </div>
 
-      {accountsError ? (
+      {accountsError || partiesError ? (
         <div className="rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
-          {accountsError}
+          {accountsError || partiesError}
         </div>
       ) : null}
 
@@ -275,17 +357,40 @@ export function VoucherEntryForm({ type, description }: VoucherEntryFormProps) {
           </div>
           {showParty ? (
             <div className="grid gap-2">
-              <Label>Party</Label>
-              <Select value={party || undefined} onValueChange={setParty}>
+              <Label>
+                Party{" "}
+                <span className="text-muted-foreground font-normal">
+                  ({type === "payment" ? "vendors" : "customers"})
+                </span>
+              </Label>
+              <Select
+                value={party || undefined}
+                onValueChange={setParty}
+                disabled={loadingOptions}
+              >
                 <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Select party" />
+                  <SelectValue
+                    placeholder={
+                      loadingOptions
+                        ? "Loading parties…"
+                        : type === "payment"
+                          ? "Select vendor"
+                          : "Select customer"
+                    }
+                  />
                 </SelectTrigger>
                 <SelectContent>
-                  {partyOptions.map((option) => (
-                    <SelectItem key={option} value={option}>
-                      {option}
+                  {partyOptions.length === 0 ? (
+                    <SelectItem value="__none" disabled>
+                      No parties found
                     </SelectItem>
-                  ))}
+                  ) : (
+                    partyOptions.map((option) => (
+                      <SelectItem key={`${option.kind}-${option.code || option.value}`} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))
+                  )}
                 </SelectContent>
               </Select>
             </div>
@@ -301,12 +406,17 @@ export function VoucherEntryForm({ type, description }: VoucherEntryFormProps) {
                 <Select
                   value={fromAccountId || undefined}
                   onValueChange={setFromAccountId}
+                  disabled={loadingOptions}
                 >
                   <SelectTrigger className="w-full">
-                    <SelectValue placeholder="Select account" />
+                    <SelectValue
+                      placeholder={
+                        loadingOptions ? "Loading accounts…" : "Select account"
+                      }
+                    />
                   </SelectTrigger>
                   <SelectContent>
-                    {accountOptions.map((option) => (
+                    {fromAccountOptions.map((option) => (
                       <SelectItem key={option.value} value={option.value}>
                         {option.label}
                       </SelectItem>
@@ -323,12 +433,17 @@ export function VoucherEntryForm({ type, description }: VoucherEntryFormProps) {
                 <Select
                   value={toAccountId || undefined}
                   onValueChange={setToAccountId}
+                  disabled={loadingOptions}
                 >
                   <SelectTrigger className="w-full">
-                    <SelectValue placeholder="Select account" />
+                    <SelectValue
+                      placeholder={
+                        loadingOptions ? "Loading accounts…" : "Select account"
+                      }
+                    />
                   </SelectTrigger>
                   <SelectContent>
-                    {accountOptions.map((option) => (
+                    {toAccountOptions.map((option) => (
                       <SelectItem key={option.value} value={option.value}>
                         {option.label}
                       </SelectItem>

@@ -1,4 +1,4 @@
-export { formatCurrency } from "@/lib/format-currency";
+export { formatCurrency, formatCurrencyCompact } from "@/lib/format-currency";
 
 export function formatPercent(value: number) {
   return `${value > 0 ? "+" : ""}${value.toFixed(1)}%`;

@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 
 import { findNavByPath } from "@/config/navigation";
+import { useAuth } from "@/features/auth/AuthProvider";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Separator } from "@/components/ui/separator";
 import { Input } from "@/components/ui/input";
@@ -34,9 +35,20 @@ import {
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb";
 
+function initials(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return "?";
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return `${parts[0][0] ?? ""}${parts[1][0] ?? ""}`.toUpperCase();
+}
+
 export function AppNavbar() {
   const pathname = usePathname();
+  const { user, logout } = useAuth();
   const { title, breadcrumbs } = findNavByPath(pathname);
+  const displayName = user?.name || user?.employee_code || "User";
+  const displayEmail = user?.email || user?.employee_code || "";
+  const shortName = displayName.split(/\s+/)[0] || "User";
 
   return (
     <header className="sticky top-0 z-20 flex h-14 shrink-0 items-center gap-3 border-b border-border/70 bg-background/80 px-4 backdrop-blur-md supports-backdrop-filter:bg-background/70 print:hidden">
@@ -101,11 +113,11 @@ export function AppNavbar() {
             >
               <Avatar size="sm">
                 <AvatarFallback className="bg-primary/15 text-[10px] font-semibold text-primary">
-                  AD
+                  {initials(displayName)}
                 </AvatarFallback>
               </Avatar>
               <span className="hidden text-sm font-medium md:inline">
-                Admin
+                {shortName}
               </span>
               <ChevronDown className="hidden size-3.5 text-muted-foreground md:inline" />
             </Button>
@@ -113,9 +125,9 @@ export function AppNavbar() {
           <DropdownMenuContent align="end" className="w-52">
             <DropdownMenuLabel className="font-normal">
               <div className="flex flex-col gap-0.5">
-                <span className="text-sm font-medium">Admin User</span>
+                <span className="text-sm font-medium">{displayName}</span>
                 <span className="text-xs text-muted-foreground">
-                  admin@assetiq.io
+                  {displayEmail}
                 </span>
               </div>
             </DropdownMenuLabel>
@@ -129,7 +141,7 @@ export function AppNavbar() {
               Settings
             </DropdownMenuItem>
             <DropdownMenuSeparator />
-            <DropdownMenuItem variant="destructive">
+            <DropdownMenuItem variant="destructive" onClick={logout}>
               <LogOut className="size-4" />
               Sign out
             </DropdownMenuItem>

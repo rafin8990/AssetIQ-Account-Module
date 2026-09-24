@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Save, Send } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -24,36 +24,131 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 
 import {
-  formatCurrency,
-  getOutstandingBills,
-  payFromAccounts,
-  supplierBills,
-  suppliers,
-} from "./data";
+  createSupplierBillPayment,
+  listSupplierBills,
+  type SupplierBill,
+} from "@/features/accounts-payable/api/supplier-bills";
+import { listAccounts } from "@/features/chart-of-accounts/api/accounts";
+import { formatCurrency } from "./data";
+
+type PayAccount = {
+  id: string;
+  name: string;
+  type: string;
+};
 
 export function SupplierPaymentForm() {
-  const [supplier, setSupplier] = useState("");
-  const [billNo, setBillNo] = useState("");
+  const [bills, setBills] = useState<SupplierBill[]>([]);
+  const [accounts, setAccounts] = useState<PayAccount[]>([]);
+  const [vendor, setVendor] = useState("");
+  const [billId, setBillId] = useState("");
   const [amount, setAmount] = useState("");
   const [payFrom, setPayFrom] = useState("");
-  const [method, setMethod] = useState("");
-  const [date, setDate] = useState("2026-03-21");
+  const [expenseAccountId, setExpenseAccountId] = useState("");
+  const [method, setMethod] = useState("Bank transfer");
+  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [reference, setReference] = useState("");
   const [notes, setNotes] = useState("");
-  const [savedAs, setSavedAs] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
 
-  const openBills = useMemo(() => {
-    return getOutstandingBills().filter((bill) =>
-      supplier ? bill.supplier === supplier : true
-    );
-  }, [supplier]);
+  const loadData = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const [openBills, accountRows] = await Promise.all([
+        listSupplierBills({ outstanding: true }),
+        listAccounts(),
+      ]);
+      setBills(openBills);
+      setAccounts(
+        accountRows
+          .filter((row) => {
+            const type = String(row.type ?? "");
+            return type === "cash" || type === "bank" || type === "expense";
+          })
+          .map((row) => ({
+            id: String(row.id),
+            name: String(row.name ?? ""),
+            type: String(row.type ?? ""),
+          }))
+      );
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Failed to load payment data"
+      );
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
-  const selectedBill = supplierBills.find((bill) => bill.billNo === billNo);
+  useEffect(() => {
+    void loadData();
+  }, [loadData]);
 
-  function handleSave(status: "saved" | "posted") {
-    setSavedAs(
-      `PAY-2026-${String(Math.floor(Math.random() * 90) + 10).padStart(4, "0")} (${status})`
-    );
+  const vendors = useMemo(() => {
+    const names = new Set(bills.map((bill) => bill.vendor));
+    return Array.from(names).sort();
+  }, [bills]);
+
+  const openBills = useMemo(
+    () => bills.filter((bill) => (vendor ? bill.vendor === vendor : true)),
+    [bills, vendor]
+  );
+
+  const selectedBill = bills.find((bill) => bill.id === billId);
+
+  const payFromAccounts = accounts.filter(
+    (account) => account.type === "cash" || account.type === "bank"
+  );
+  const expenseAccounts = accounts.filter(
+    (account) => account.type === "expense"
+  );
+
+  async function handlePost() {
+    if (!selectedBill) return;
+    const paymentAmount = Number(amount);
+    if (!(paymentAmount > 0)) {
+      setError("Enter a valid payment amount");
+      return;
+    }
+    if (!payFrom) {
+      setError("Select a pay-from account");
+      return;
+    }
+
+    setSaving(true);
+    setError(null);
+    setMessage(null);
+    try {
+      const result = await createSupplierBillPayment(selectedBill.id, {
+        amount: paymentAmount,
+        payment_method: method,
+        paid_at: date,
+        reference: reference || undefined,
+        remarks: notes || undefined,
+        cash_account_id: Number(payFrom),
+        expense_account_id: expenseAccountId
+          ? Number(expenseAccountId)
+          : undefined,
+      });
+      setMessage(
+        `Payment posted for ${result.bill.billNo}. Balance ${formatCurrency(result.bill.balance)}.`
+      );
+      setAmount("");
+      setReference("");
+      setNotes("");
+      setBillId("");
+      await loadData();
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Failed to post bill payment"
+      );
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
@@ -64,33 +159,47 @@ export function SupplierPaymentForm() {
             Supplier Payments
           </h2>
           <p className="text-sm text-muted-foreground">
-            Pay open supplier bills from cash or bank accounts.
+            Pay open supplier bills from cash or bank accounts (live from
+            Accounts API).
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
           <Button
             variant="outline"
             className="gap-1.5"
-            onClick={() => handleSave("saved")}
+            disabled={saving || loading}
+            onClick={() => void loadData()}
           >
             <Save className="size-4" />
-            Save
+            Refresh
           </Button>
           <Button
             className="gap-1.5 shadow-sm shadow-primary/20"
-            disabled={!supplier || !amount || Number(amount) <= 0 || !payFrom}
-            onClick={() => handleSave("posted")}
+            disabled={
+              saving ||
+              loading ||
+              !selectedBill ||
+              !amount ||
+              Number(amount) <= 0 ||
+              !payFrom
+            }
+            onClick={() => void handlePost()}
           >
             <Send className="size-4" />
-            Post Payment
+            {saving ? "Posting…" : "Post Payment"}
           </Button>
         </div>
       </div>
 
-      {savedAs ? (
+      {error ? (
+        <div className="rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+          {error}
+        </div>
+      ) : null}
+
+      {message ? (
         <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
-          Dummy supplier payment recorded as{" "}
-          <span className="font-semibold">{savedAs}</span>.
+          {message}
         </div>
       ) : null}
 
@@ -99,26 +208,27 @@ export function SupplierPaymentForm() {
           <CardHeader className="border-b border-border/60 pb-4">
             <CardTitle className="text-base">Payment details</CardTitle>
             <CardDescription>
-              Apply payment against an outstanding supplier bill
+              Capture payment against an open supplier bill
             </CardDescription>
           </CardHeader>
           <CardContent className="grid gap-4 pt-4 sm:grid-cols-2">
             <div className="grid gap-2 sm:col-span-2">
-              <Label>Supplier</Label>
+              <Label>Vendor</Label>
               <Select
-                value={supplier || undefined}
+                value={vendor || undefined}
                 onValueChange={(value) => {
-                  setSupplier(value);
-                  setBillNo("");
+                  setVendor(value);
+                  setBillId("");
                 }}
+                disabled={loading}
               >
                 <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Select supplier" />
+                  <SelectValue placeholder="Select vendor" />
                 </SelectTrigger>
                 <SelectContent>
-                  {suppliers.map((item) => (
-                    <SelectItem key={item.id} value={item.name}>
-                      {item.name}
+                  {vendors.map((name) => (
+                    <SelectItem key={name} value={name}>
+                      {name}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -128,20 +238,23 @@ export function SupplierPaymentForm() {
             <div className="grid gap-2">
               <Label>Apply to bill</Label>
               <Select
-                value={billNo || undefined}
+                value={billId || undefined}
                 onValueChange={(value) => {
-                  setBillNo(value);
-                  const bill = openBills.find((b) => b.billNo === value);
+                  setBillId(value);
+                  const bill = openBills.find((row) => row.id === value);
                   if (bill) setAmount(String(bill.balance));
                 }}
+                disabled={loading}
               >
                 <SelectTrigger className="w-full">
                   <SelectValue placeholder="Select bill" />
                 </SelectTrigger>
                 <SelectContent>
                   {openBills.map((bill) => (
-                    <SelectItem key={bill.id} value={bill.billNo}>
-                      {bill.billNo} — {formatCurrency(bill.balance)}
+                    <SelectItem key={bill.id} value={bill.id}>
+                      {bill.billNo}
+                      {bill.sourcePoCode ? ` · ${bill.sourcePoCode}` : ""} —{" "}
+                      {formatCurrency(bill.balance)}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -149,7 +262,7 @@ export function SupplierPaymentForm() {
             </div>
 
             <div className="grid gap-2">
-              <Label htmlFor="amount">Payment amount</Label>
+              <Label htmlFor="amount">Amount paid</Label>
               <Input
                 id="amount"
                 type="number"
@@ -161,14 +274,38 @@ export function SupplierPaymentForm() {
 
             <div className="grid gap-2">
               <Label>Pay from</Label>
-              <Select value={payFrom || undefined} onValueChange={setPayFrom}>
+              <Select
+                value={payFrom || undefined}
+                onValueChange={setPayFrom}
+                disabled={loading}
+              >
                 <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Select account" />
+                  <SelectValue placeholder="Cash / bank account" />
                 </SelectTrigger>
                 <SelectContent>
                   {payFromAccounts.map((account) => (
-                    <SelectItem key={account} value={account}>
-                      {account}
+                    <SelectItem key={account.id} value={account.id}>
+                      {account.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="grid gap-2">
+              <Label>Expense account</Label>
+              <Select
+                value={expenseAccountId || undefined}
+                onValueChange={setExpenseAccountId}
+                disabled={loading}
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="Optional if already set" />
+                </SelectTrigger>
+                <SelectContent>
+                  {expenseAccounts.map((account) => (
+                    <SelectItem key={account.id} value={account.id}>
+                      {account.name}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -234,9 +371,17 @@ export function SupplierPaymentForm() {
                   <span className="text-muted-foreground">Bill</span>
                   <span className="font-medium">{selectedBill.billNo}</span>
                 </div>
+                {selectedBill.sourcePoCode ? (
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-muted-foreground">PO</span>
+                    <span className="font-medium">
+                      {selectedBill.sourcePoCode}
+                    </span>
+                  </div>
+                ) : null}
                 <div className="flex items-center justify-between text-sm">
-                  <span className="text-muted-foreground">Supplier</span>
-                  <span className="font-medium">{selectedBill.supplier}</span>
+                  <span className="text-muted-foreground">Vendor</span>
+                  <span className="font-medium">{selectedBill.vendor}</span>
                 </div>
                 <div className="flex items-center justify-between text-sm">
                   <span className="text-muted-foreground">Bill amount</span>
@@ -262,7 +407,9 @@ export function SupplierPaymentForm() {
               </>
             ) : (
               <p className="text-sm text-muted-foreground">
-                Select a supplier and bill to preview balances.
+                {loading
+                  ? "Loading outstanding bills…"
+                  : "Select a vendor and bill to preview balances."}
               </p>
             )}
           </CardContent>

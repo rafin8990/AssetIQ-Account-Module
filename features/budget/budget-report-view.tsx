@@ -31,6 +31,7 @@ import { cn } from "@/lib/utils";
 import {
   budgetComparisons,
   formatCurrency,
+  formatCurrencyCompact,
   getVariance,
   getVariancePct,
 } from "./data";
@@ -130,7 +131,7 @@ export function BudgetReportView({ kind }: { kind: ReportKind }) {
                 tickLine={false}
                 axisLine={false}
                 width={52}
-                tickFormatter={(value) => `$${value / 1000}k`}
+                tickFormatter={(value) => formatCurrencyCompact(Number(value))}
               />
               <ChartTooltip
                 content={

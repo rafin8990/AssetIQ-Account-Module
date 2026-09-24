@@ -23,6 +23,16 @@ type TableReportProps = {
   columns: ReportColumn[];
   rows: ReportRow[];
   currencyKeys?: string[];
+  badge?: string;
+  dataBadge?: string;
+  fromDate?: string;
+  toDate?: string;
+  onFromDateChange?: (value: string) => void;
+  onToDateChange?: (value: string) => void;
+  showDates?: boolean;
+  loading?: boolean;
+  error?: string | null;
+  emptyMessage?: string;
 };
 
 export function TableReport({
@@ -31,9 +41,33 @@ export function TableReport({
   columns,
   rows,
   currencyKeys = [],
+  badge,
+  dataBadge,
+  fromDate,
+  toDate,
+  onFromDateChange,
+  onToDateChange,
+  showDates,
+  loading,
+  error,
+  emptyMessage,
 }: TableReportProps) {
   return (
-    <ReportShell title={title} description={description}>
+    <ReportShell
+      title={title}
+      description={description}
+      badge={badge}
+      dataBadge={dataBadge}
+      fromDate={fromDate}
+      toDate={toDate}
+      onFromDateChange={onFromDateChange}
+      onToDateChange={onToDateChange}
+      showDates={showDates}
+      loading={loading}
+      error={error}
+      emptyMessage={emptyMessage}
+      isEmpty={!loading && !error && rows.length === 0}
+    >
       <Table>
         <TableHeader>
           <TableRow className="hover:bg-transparent">

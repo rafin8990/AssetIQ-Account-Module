@@ -2,6 +2,8 @@
 export const DEFAULT_ACCOUNTS_URL = "http://localhost:5009/api/v1";
 /** Asset microservice base URL — must include `/api/v1`. */
 export const DEFAULT_ASSET_URL = "http://localhost:5005/api/v1";
+/** Vendor microservice base URL — must include `/api/v1`. */
+export const DEFAULT_VENDOR_URL = "http://localhost:5008/api/v1";
 
 function normalizeApiBaseUrl(base: string | undefined, fallback: string): string {
   return (base ?? fallback).replace(/\/+$/, "");
@@ -15,5 +17,9 @@ export const env = {
   assetUrl: normalizeApiBaseUrl(
     process.env.NEXT_PUBLIC_ASSET_URL,
     DEFAULT_ASSET_URL
+  ),
+  vendorUrl: normalizeApiBaseUrl(
+    process.env.NEXT_PUBLIC_VENDOR_URL,
+    DEFAULT_VENDOR_URL
   ),
 };

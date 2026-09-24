@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Paperclip, Search } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -32,10 +32,14 @@ import {
 import { cn } from "@/lib/utils";
 
 import {
+  listTransactionHistory,
+  type TransactionHistoryItem,
+  type TransactionHistoryTotals,
+} from "@/features/transactions/api/transaction-history";
+import {
   formatCurrency,
   formatDate,
   transactionKindLabels,
-  transactions,
   type TransactionKind,
 } from "./data";
 
@@ -47,37 +51,49 @@ const kindTone: Record<TransactionKind, string> = {
   transfer: "bg-teal-50 text-teal-700",
 };
 
+const emptyTotals: TransactionHistoryTotals = {
+  inflow: 0,
+  outflow: 0,
+  other: 0,
+};
+
 export function TransactionHistoryView() {
   const [query, setQuery] = useState("");
-  const [kindFilter, setKindFilter] = useState("all");
+  const [kindFilter, setKindFilter] = useState<TransactionKind | "all">("all");
+  const [rows, setRows] = useState<TransactionHistoryItem[]>([]);
+  const [totals, setTotals] = useState<TransactionHistoryTotals>(emptyTotals);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  const rows = useMemo(() => {
-    return transactions.filter((txn) => {
-      if (kindFilter !== "all" && txn.kind !== kindFilter) return false;
-      const q = query.trim().toLowerCase();
-      if (!q) return true;
-      return (
-        txn.txnNo.toLowerCase().includes(q) ||
-        txn.account.toLowerCase().includes(q) ||
-        txn.category.toLowerCase().includes(q) ||
-        (txn.party ?? "").toLowerCase().includes(q) ||
-        txn.reference.toLowerCase().includes(q) ||
-        txn.narration.toLowerCase().includes(q)
+  const loadHistory = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const result = await listTransactionHistory({
+        kind: kindFilter,
+        searchTerm: query.trim() || undefined,
+      });
+      setRows(result.items);
+      setTotals(result.totals);
+    } catch (err) {
+      setRows([]);
+      setTotals(emptyTotals);
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Failed to load transaction history"
       );
-    });
+    } finally {
+      setLoading(false);
+    }
   }, [kindFilter, query]);
 
-  const totals = useMemo(() => {
-    return rows.reduce(
-      (acc, txn) => {
-        if (txn.kind === "income") acc.inflow += txn.amount;
-        else if (txn.kind === "expense") acc.outflow += txn.amount;
-        else acc.other += txn.amount;
-        return acc;
-      },
-      { inflow: 0, outflow: 0, other: 0 }
-    );
-  }, [rows]);
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void loadHistory();
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [loadHistory]);
 
   return (
     <div className="flex flex-col gap-5">
@@ -89,6 +105,12 @@ export function TransactionHistoryView() {
           Review all income, expense, cash, bank, and transfer movements.
         </p>
       </div>
+
+      {error ? (
+        <div className="rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+          {error}
+        </div>
+      ) : null}
 
       <div className="grid gap-3 sm:grid-cols-3">
         <Card className="border-0 bg-card/90 shadow-sm ring-border/60">
@@ -124,7 +146,11 @@ export function TransactionHistoryView() {
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div>
               <CardTitle className="text-base">History</CardTitle>
-              <CardDescription>{rows.length} transaction(s)</CardDescription>
+              <CardDescription>
+                {loading
+                  ? "Loading…"
+                  : `${rows.length} transaction(s)`}
+              </CardDescription>
             </div>
             <div className="flex flex-col gap-2 sm:flex-row">
               <div className="relative sm:w-56">
@@ -136,19 +162,24 @@ export function TransactionHistoryView() {
                   className="h-8 pl-8"
                 />
               </div>
-              <Select value={kindFilter} onValueChange={setKindFilter}>
+              <Select
+                value={kindFilter}
+                onValueChange={(value) =>
+                  setKindFilter(value as TransactionKind | "all")
+                }
+              >
                 <SelectTrigger className="h-8 w-full sm:w-44">
                   <SelectValue placeholder="Type" />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All types</SelectItem>
-                  {(Object.keys(transactionKindLabels) as TransactionKind[]).map(
-                    (kind) => (
-                      <SelectItem key={kind} value={kind}>
-                        {transactionKindLabels[kind]}
-                      </SelectItem>
-                    )
-                  )}
+                  {(
+                    Object.keys(transactionKindLabels) as TransactionKind[]
+                  ).map((kind) => (
+                    <SelectItem key={kind} value={kind}>
+                      {transactionKindLabels[kind]}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
@@ -168,7 +199,16 @@ export function TransactionHistoryView() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {rows.length === 0 ? (
+              {loading ? (
+                <TableRow>
+                  <TableCell
+                    colSpan={7}
+                    className="h-24 text-center text-muted-foreground"
+                  >
+                    Loading…
+                  </TableCell>
+                </TableRow>
+              ) : rows.length === 0 ? (
                 <TableRow>
                   <TableCell
                     colSpan={7}
@@ -181,7 +221,15 @@ export function TransactionHistoryView() {
                 rows.map((txn) => (
                   <TableRow key={txn.id}>
                     <TableCell className="pl-4 font-medium">
-                      {txn.txnNo}
+                      <div>{txn.txnNo}</div>
+                      <div className="text-xs text-muted-foreground capitalize">
+                        {txn.status}
+                        {txn.sourceOrderCode
+                          ? ` · ${txn.sourceOrderCode}`
+                          : txn.reference && txn.kind === "income"
+                            ? ` · ${txn.reference}`
+                            : ""}
+                      </div>
                     </TableCell>
                     <TableCell className="text-muted-foreground tabular-nums">
                       {formatDate(txn.date)}
@@ -189,23 +237,26 @@ export function TransactionHistoryView() {
                     <TableCell>
                       <Badge
                         variant="secondary"
-                        className={cn("border-0 capitalize", kindTone[txn.kind])}
+                        className={cn(
+                          "border-0 capitalize",
+                          kindTone[txn.kind]
+                        )}
                       >
                         {txn.kind}
                       </Badge>
                     </TableCell>
                     <TableCell className="hidden md:table-cell">
                       <div className="flex flex-col gap-0.5">
-                        <span>{txn.account}</span>
+                        <span>{txn.account ?? "—"}</span>
                         {txn.contraAccount ? (
                           <span className="text-xs text-muted-foreground">
                             → {txn.contraAccount}
                           </span>
-                        ) : (
+                        ) : txn.category ? (
                           <span className="text-xs text-muted-foreground">
                             {txn.category}
                           </span>
-                        )}
+                        ) : null}
                       </div>
                     </TableCell>
                     <TableCell className="hidden text-muted-foreground lg:table-cell">
@@ -215,12 +266,18 @@ export function TransactionHistoryView() {
                       className={cn(
                         "text-right font-semibold tabular-nums",
                         txn.kind === "income" && "text-emerald-700",
-                        txn.kind === "expense" && "text-rose-600"
+                        txn.kind === "expense" && "text-rose-600",
+                        txn.direction === "in" &&
+                          txn.kind !== "income" &&
+                          "text-emerald-700",
+                        txn.direction === "out" &&
+                          txn.kind !== "expense" &&
+                          "text-rose-600"
                       )}
                     >
-                      {txn.kind === "income"
+                      {txn.kind === "income" || txn.direction === "in"
                         ? "+"
-                        : txn.kind === "expense"
+                        : txn.kind === "expense" || txn.direction === "out"
                           ? "−"
                           : ""}
                       {formatCurrency(txn.amount)}

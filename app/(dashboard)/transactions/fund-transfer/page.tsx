@@ -1,10 +1,5 @@
-import { TransactionEntryForm } from "@/features/transactions/transaction-entry-form";
+import { FundTransferView } from "@/features/transactions/fund-transfer-view";
 
 export default function FundTransferPage() {
-  return (
-    <TransactionEntryForm
-      kind="transfer"
-      description="Move funds between cash and bank accounts without affecting profit or loss."
-    />
-  );
+  return <FundTransferView />;
 }

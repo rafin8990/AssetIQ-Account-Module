@@ -18,9 +18,10 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 
-import { formatCurrency, kpiMetrics } from "./data";
+import type { DashboardKpi } from "./api/dashboard";
+import { formatCurrency } from "./data";
 
-const iconMap: Record<(typeof kpiMetrics)[number]["key"], LucideIcon> = {
+const iconMap: Record<DashboardKpi["key"], LucideIcon> = {
   income: TrendingUp,
   expense: TrendingDown,
   profit: CircleDollarSign,
@@ -30,7 +31,7 @@ const iconMap: Record<(typeof kpiMetrics)[number]["key"], LucideIcon> = {
   payable: Banknote,
 };
 
-const toneMap: Record<(typeof kpiMetrics)[number]["key"], string> = {
+const toneMap: Record<DashboardKpi["key"], string> = {
   income: "bg-emerald-500/10 text-emerald-600",
   expense: "bg-rose-500/10 text-rose-600",
   profit: "bg-primary/10 text-primary",
@@ -40,13 +41,36 @@ const toneMap: Record<(typeof kpiMetrics)[number]["key"], string> = {
   payable: "bg-orange-500/10 text-orange-700",
 };
 
-export function DashboardKpis() {
+export function DashboardKpis({
+  metrics,
+  loading,
+}: {
+  metrics: DashboardKpi[];
+  loading?: boolean;
+}) {
+  if (loading) {
+    return (
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        {Array.from({ length: 7 }).map((_, index) => (
+          <Card
+            key={index}
+            className="border-0 bg-card/90 shadow-sm ring-border/60"
+          >
+            <CardContent className="h-28 animate-pulse bg-muted/40 pt-1" />
+          </Card>
+        ))}
+      </div>
+    );
+  }
+
   return (
     <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-      {kpiMetrics.map((metric) => {
+      {metrics.map((metric) => {
         const Icon = iconMap[metric.key];
         const isProfit = metric.key === "profit";
         const isNegativeProfit = isProfit && metric.value < 0;
+        const showChange =
+          metric.key !== "receivable" && metric.key !== "payable";
 
         return (
           <Card
@@ -63,22 +87,28 @@ export function DashboardKpis() {
                 >
                   <Icon className="size-4" />
                 </div>
-                <Badge
-                  variant="secondary"
-                  className={cn(
-                    "gap-0.5 border-0 font-medium",
-                    metric.trend === "up"
-                      ? "bg-emerald-50 text-emerald-700"
-                      : "bg-rose-50 text-rose-700"
-                  )}
-                >
-                  {metric.trend === "up" ? (
-                    <ArrowUpRight className="size-3" />
-                  ) : (
-                    <ArrowDownRight className="size-3" />
-                  )}
-                  {Math.abs(metric.change)}%
-                </Badge>
+                {showChange ? (
+                  <Badge
+                    variant="secondary"
+                    className={cn(
+                      "gap-0.5 border-0 font-medium",
+                      metric.trend === "up"
+                        ? "bg-emerald-50 text-emerald-700"
+                        : "bg-rose-50 text-rose-700"
+                    )}
+                  >
+                    {metric.trend === "up" ? (
+                      <ArrowUpRight className="size-3" />
+                    ) : (
+                      <ArrowDownRight className="size-3" />
+                    )}
+                    {Math.abs(metric.change)}%
+                  </Badge>
+                ) : (
+                  <Badge variant="secondary" className="border-0 font-normal">
+                    Live
+                  </Badge>
+                )}
               </div>
 
               <div>

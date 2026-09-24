@@ -28,6 +28,7 @@ export type Voucher = {
   lines: VoucherLine[];
 };
 
+/** @deprecated Prefer API-backed party lists from `@/features/parties/api/parties`. */
 export const partyOptions = [
   "Horizon Supplies",
   "Bright Media Ltd.",
@@ -36,7 +37,6 @@ export const partyOptions = [
   "City Utilities",
   "Orion Logistics",
 ];
-
 export const voucherTypeLabels: Record<VoucherType, string> = {
   payment: "Payment Voucher",
   receipt: "Receipt Voucher",

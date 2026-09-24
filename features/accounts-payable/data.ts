@@ -294,7 +294,7 @@ export const payFromAccounts = [
   "Cash in Hand",
 ];
 
-export { formatCurrency } from "@/lib/format-currency";
+export { formatCurrency, formatCurrencyCompact } from "@/lib/format-currency";
 
 export function formatDate(value: string) {
   return new Intl.DateTimeFormat("en-US", {

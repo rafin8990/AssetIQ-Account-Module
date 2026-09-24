@@ -251,7 +251,7 @@ export const budgetComparisons: BudgetComparison[] = [
   },
 ];
 
-export { formatCurrency } from "@/lib/format-currency";
+export { formatCurrency, formatCurrencyCompact } from "@/lib/format-currency";
 
 export function getBudgetsByScope(scope: BudgetScope) {
   return budgets.filter((budget) => budget.scope === scope);

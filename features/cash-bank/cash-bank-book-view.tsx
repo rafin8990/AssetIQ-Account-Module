@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import {
@@ -10,6 +10,8 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
@@ -27,33 +29,100 @@ import {
 } from "@/components/ui/table";
 
 import {
-  bankAccounts,
-  bankBookEntries,
-  cashAccounts,
-  cashBookEntries,
-  formatCurrency,
-  formatDate,
-  type BookEntry,
-  type MoneyAccount,
-} from "./data";
+  getCashBankBook,
+  type CashBankBook,
+} from "@/features/cash-bank/api/cash-bank-books";
+import { listAccounts } from "@/features/chart-of-accounts/api/accounts";
+import { formatCurrency } from "@/lib/format-currency";
+import { formatDate } from "@/features/cash-bank/data";
 
 type BookKind = "cash" | "bank";
 
+type AccountOption = {
+  id: string;
+  name: string;
+  code: string;
+};
+
 export function CashBankBookView({ kind }: { kind: BookKind }) {
-  const accounts: MoneyAccount[] = kind === "cash" ? cashAccounts : bankAccounts;
-  const entries: BookEntry[] =
-    kind === "cash" ? cashBookEntries : bankBookEntries;
+  const [accounts, setAccounts] = useState<AccountOption[]>([]);
+  const [accountId, setAccountId] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [book, setBook] = useState<CashBankBook | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  const [account, setAccount] = useState(accounts[0]?.name ?? "");
+  useEffect(() => {
+    let cancelled = false;
 
-  const rows = useMemo(
-    () => entries.filter((entry) => entry.account === account),
-    [account, entries]
-  );
+    void (async () => {
+      try {
+        const rows = await listAccounts({ type: kind, status: "active" });
+        if (cancelled) return;
+        const options = rows.map((row) => ({
+          id: String(row.id),
+          name: String(row.name),
+          code: String(row.code ?? ""),
+        }));
+        setAccounts(options);
+        setAccountId((prev) => prev || options[0]?.id || "");
+        setError(null);
+      } catch (err) {
+        if (cancelled) return;
+        setError(
+          err instanceof Error ? err.message : "Failed to load accounts"
+        );
+      }
+    })();
 
-  const totalDebit = rows.reduce((sum, row) => sum + row.debit, 0);
-  const totalCredit = rows.reduce((sum, row) => sum + row.credit, 0);
-  const closing = rows.at(-1)?.balance ?? 0;
+    return () => {
+      cancelled = true;
+    };
+  }, [kind]);
+
+  useEffect(() => {
+    if (!accountId) {
+      setBook(null);
+      setLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+
+    void (async () => {
+      setLoading(true);
+      try {
+        const result = await getCashBankBook({
+          accountId,
+          dateFrom: dateFrom || undefined,
+          dateTo: dateTo || undefined,
+        });
+        if (cancelled) return;
+        setBook(result);
+        setError(null);
+      } catch (err) {
+        if (cancelled) return;
+        setBook(null);
+        setError(
+          err instanceof Error ? err.message : "Failed to load book"
+        );
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [accountId, dateFrom, dateTo]);
+
+  const selectedName =
+    accounts.find((item) => item.id === accountId)?.name ?? "Account";
+  const rows = book?.entries ?? [];
+  const totalDebit = book?.totals.debit ?? 0;
+  const totalCredit = book?.totals.credit ?? 0;
+  const closing = book?.closingBalance ?? 0;
 
   return (
     <div className="flex flex-col gap-5">
@@ -68,19 +137,48 @@ export function CashBankBookView({ kind }: { kind: BookKind }) {
               : "Day book of bank deposits and withdrawals."}
           </p>
         </div>
-        <Select value={account} onValueChange={setAccount}>
-          <SelectTrigger className="w-full sm:w-64">
-            <SelectValue placeholder="Select account" />
-          </SelectTrigger>
-          <SelectContent>
-            {accounts.map((item) => (
-              <SelectItem key={item.id} value={item.name}>
-                {item.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+          <div className="grid gap-1">
+            <Label className="text-xs text-muted-foreground">From</Label>
+            <Input
+              type="date"
+              value={dateFrom}
+              onChange={(e) => setDateFrom(e.target.value)}
+              className="w-full sm:w-40"
+            />
+          </div>
+          <div className="grid gap-1">
+            <Label className="text-xs text-muted-foreground">To</Label>
+            <Input
+              type="date"
+              value={dateTo}
+              onChange={(e) => setDateTo(e.target.value)}
+              className="w-full sm:w-40"
+            />
+          </div>
+          <Select
+            value={accountId || undefined}
+            onValueChange={setAccountId}
+          >
+            <SelectTrigger className="w-full sm:w-64">
+              <SelectValue placeholder="Select account" />
+            </SelectTrigger>
+            <SelectContent>
+              {accounts.map((item) => (
+                <SelectItem key={item.id} value={item.id}>
+                  {item.code ? `${item.name} (${item.code})` : item.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
       </div>
+
+      {error ? (
+        <div className="rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+          {error}
+        </div>
+      ) : null}
 
       <div className="grid gap-3 sm:grid-cols-3">
         <Card className="border-0 bg-card/90 shadow-sm ring-border/60">
@@ -115,8 +213,12 @@ export function CashBankBookView({ kind }: { kind: BookKind }) {
         <CardHeader className="border-b border-border/60 pb-4">
           <div className="flex items-center justify-between gap-3">
             <div>
-              <CardTitle className="text-base">{account}</CardTitle>
-              <CardDescription>{rows.length} entr(y/ies)</CardDescription>
+              <CardTitle className="text-base">{selectedName}</CardTitle>
+              <CardDescription>
+                {loading
+                  ? "Loading…"
+                  : `${rows.length} entr${rows.length === 1 ? "y" : "ies"} · Opening ${formatCurrency(book?.openingBalance ?? 0)}`}
+              </CardDescription>
             </div>
             <Badge variant="secondary">
               {kind === "cash" ? "Cash Book" : "Bank Book"}
@@ -136,7 +238,7 @@ export function CashBankBookView({ kind }: { kind: BookKind }) {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {rows.length === 0 ? (
+              {!loading && rows.length === 0 ? (
                 <TableRow>
                   <TableCell
                     colSpan={6}
@@ -151,8 +253,10 @@ export function CashBankBookView({ kind }: { kind: BookKind }) {
                     <TableCell className="pl-4 text-muted-foreground tabular-nums">
                       {formatDate(row.date)}
                     </TableCell>
-                    <TableCell className="font-medium">{row.reference}</TableCell>
-                    <TableCell>{row.description}</TableCell>
+                    <TableCell className="font-medium">
+                      {row.reference || row.voucherNo || "—"}
+                    </TableCell>
+                    <TableCell>{row.description || "—"}</TableCell>
                     <TableCell className="text-right text-emerald-700 tabular-nums">
                       {row.debit ? formatCurrency(row.debit) : "—"}
                     </TableCell>

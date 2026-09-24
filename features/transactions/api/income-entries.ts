@@ -1,4 +1,5 @@
 import { accountsApi } from "@/lib/api-client";
+import { formatCurrency } from "@/lib/format-currency";
 
 export type IncomeEntryStatus = "draft" | "posted";
 export type IncomeEntrySource = "manual" | "order";
@@ -220,9 +221,5 @@ export async function deleteIncomePayment(
 }
 
 export function formatIncomeCurrency(value: number) {
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-    minimumFractionDigits: 2,
-  }).format(value);
+  return formatCurrency(value);
 }

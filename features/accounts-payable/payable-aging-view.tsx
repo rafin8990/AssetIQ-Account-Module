@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts";
 
 import {
@@ -25,7 +25,23 @@ import {
   TableRow,
 } from "@/components/ui/table";
 
-import { formatCurrency, payableAging } from "./data";
+import {
+  listSupplierBills,
+  type SupplierBill,
+} from "@/features/accounts-payable/api/supplier-bills";
+import { formatCurrency, formatCurrencyCompact } from "./data";
+
+type AgingBucket = {
+  key: string;
+  vendor: string;
+  current: number;
+  days1to30: number;
+  days31to60: number;
+  days61to90: number;
+  over90: number;
+  total: number;
+  billCount: number;
+};
 
 const chartConfig = {
   current: { label: "Current", color: "oklch(0.55 0.11 195)" },
@@ -35,9 +51,84 @@ const chartConfig = {
   over90: { label: "90+", color: "oklch(0.6 0.16 25)" },
 } satisfies ChartConfig;
 
+function daysPastDue(dueDate: string) {
+  const due = new Date(`${dueDate}T00:00:00`).getTime();
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return Math.floor((today.getTime() - due) / (1000 * 60 * 60 * 24));
+}
+
+function vendorKey(bill: SupplierBill) {
+  return (
+    bill.vendorCode?.trim() || bill.vendor.trim().toLowerCase() || bill.id
+  );
+}
+
+function buildAging(bills: SupplierBill[]): AgingBucket[] {
+  const map = new Map<string, AgingBucket>();
+
+  for (const bill of bills) {
+    if (bill.balance <= 0) continue;
+
+    const key = vendorKey(bill);
+    const existing = map.get(key) ?? {
+      key,
+      vendor: bill.vendor,
+      current: 0,
+      days1to30: 0,
+      days31to60: 0,
+      days61to90: 0,
+      over90: 0,
+      total: 0,
+      billCount: 0,
+    };
+
+    const days = daysPastDue(bill.dueDate);
+    if (days <= 0) existing.current += bill.balance;
+    else if (days <= 30) existing.days1to30 += bill.balance;
+    else if (days <= 60) existing.days31to60 += bill.balance;
+    else if (days <= 90) existing.days61to90 += bill.balance;
+    else existing.over90 += bill.balance;
+
+    existing.total += bill.balance;
+    existing.billCount += 1;
+    map.set(key, existing);
+  }
+
+  return Array.from(map.values()).sort((a, b) => b.total - a.total);
+}
+
 export function PayableAgingView() {
+  const [rows, setRows] = useState<AgingBucket[]>([]);
+  const [billCount, setBillCount] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const loadRows = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const bills = await listSupplierBills({ outstanding: true });
+      const openOnly = bills.filter((bill) => bill.balance > 0);
+      setBillCount(openOnly.length);
+      setRows(buildAging(openOnly));
+    } catch (err) {
+      setRows([]);
+      setBillCount(0);
+      setError(
+        err instanceof Error ? err.message : "Failed to load aging data"
+      );
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadRows();
+  }, [loadRows]);
+
   const totals = useMemo(() => {
-    return payableAging.reduce(
+    return rows.reduce(
       (acc, row) => ({
         current: acc.current + row.current,
         days1to30: acc.days1to30 + row.days1to30,
@@ -55,7 +146,7 @@ export function PayableAgingView() {
         total: 0,
       }
     );
-  }, []);
+  }, [rows]);
 
   const chartData = [
     { bucket: "Current", amount: totals.current, fill: "var(--color-current)" },
@@ -80,11 +171,28 @@ export function PayableAgingView() {
           Payable Aging
         </h2>
         <p className="text-sm text-muted-foreground">
-          Age supplier payables by current, 1–30, 31–60, 61–90, and 90+ days.
+          Open supplier bill balances by current, 1–30, 31–60, 61–90, and 90+
+          days (live from Accounts API).
         </p>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+      {error ? (
+        <div className="rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+          {error}
+        </div>
+      ) : null}
+
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
+        <Card className="border-0 bg-card/90 shadow-sm ring-border/60">
+          <CardContent className="pt-5">
+            <p className="text-xs text-muted-foreground uppercase">
+              Open payable
+            </p>
+            <p className="mt-1 text-lg font-semibold tabular-nums">
+              {loading ? "…" : formatCurrency(totals.total)}
+            </p>
+          </CardContent>
+        </Card>
         {[
           { label: "Current", value: totals.current },
           { label: "1-30 days", value: totals.days1to30 },
@@ -101,7 +209,7 @@ export function PayableAgingView() {
                 {item.label}
               </p>
               <p className="mt-1 text-lg font-semibold tabular-nums">
-                {formatCurrency(item.value)}
+                {loading ? "…" : formatCurrency(item.value)}
               </p>
             </CardContent>
           </Card>
@@ -113,7 +221,9 @@ export function PayableAgingView() {
           <CardHeader className="border-b border-border/60 pb-4">
             <CardTitle className="text-base">Aging distribution</CardTitle>
             <CardDescription>
-              Total payable {formatCurrency(totals.total)}
+              {loading
+                ? "Loading…"
+                : `${billCount} open bill(s) · ${formatCurrency(totals.total)}`}
             </CardDescription>
           </CardHeader>
           <CardContent className="pt-4">
@@ -128,7 +238,7 @@ export function PayableAgingView() {
                   tickLine={false}
                   axisLine={false}
                   width={48}
-                  tickFormatter={(value) => `$${value / 1000}k`}
+                  tickFormatter={(value) => formatCurrencyCompact(Number(value))}
                 />
                 <ChartTooltip
                   content={
@@ -146,7 +256,13 @@ export function PayableAgingView() {
         <Card className="border-0 bg-card/90 shadow-sm shadow-primary/5 ring-border/60 xl:col-span-3">
           <CardHeader className="border-b border-border/60 pb-4">
             <CardTitle className="text-base">Supplier aging sheet</CardTitle>
-            <CardDescription>Balances by aging bucket</CardDescription>
+            <CardDescription>
+              {loading
+                ? "Loading…"
+                : rows.length === 0
+                  ? "No open supplier balances"
+                  : `${rows.length} vendor(s) with open bill balance`}
+            </CardDescription>
           </CardHeader>
           <CardContent className="px-0 pt-0">
             <Table>
@@ -162,52 +278,74 @@ export function PayableAgingView() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {payableAging.map((row) => (
-                  <TableRow key={row.supplier}>
-                    <TableCell className="pl-4 font-medium">
-                      {row.supplier}
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums">
-                      {formatCurrency(row.current)}
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums">
-                      {formatCurrency(row.days1to30)}
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums">
-                      {formatCurrency(row.days31to60)}
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums">
-                      {formatCurrency(row.days61to90)}
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums">
-                      {formatCurrency(row.over90)}
-                    </TableCell>
-                    <TableCell className="pr-4 text-right font-semibold tabular-nums">
-                      {formatCurrency(row.total)}
+                {loading ? (
+                  <TableRow>
+                    <TableCell
+                      colSpan={7}
+                      className="h-24 text-center text-muted-foreground"
+                    >
+                      Loading…
                     </TableCell>
                   </TableRow>
-                ))}
-                <TableRow className="bg-muted/40 font-semibold hover:bg-muted/40">
-                  <TableCell className="pl-4">Total</TableCell>
-                  <TableCell className="text-right tabular-nums">
-                    {formatCurrency(totals.current)}
-                  </TableCell>
-                  <TableCell className="text-right tabular-nums">
-                    {formatCurrency(totals.days1to30)}
-                  </TableCell>
-                  <TableCell className="text-right tabular-nums">
-                    {formatCurrency(totals.days31to60)}
-                  </TableCell>
-                  <TableCell className="text-right tabular-nums">
-                    {formatCurrency(totals.days61to90)}
-                  </TableCell>
-                  <TableCell className="text-right tabular-nums">
-                    {formatCurrency(totals.over90)}
-                  </TableCell>
-                  <TableCell className="pr-4 text-right tabular-nums">
-                    {formatCurrency(totals.total)}
-                  </TableCell>
-                </TableRow>
+                ) : rows.length === 0 ? (
+                  <TableRow>
+                    <TableCell
+                      colSpan={7}
+                      className="h-24 text-center text-muted-foreground"
+                    >
+                      No open supplier bills to age.
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  <>
+                    {rows.map((row) => (
+                      <TableRow key={row.key}>
+                        <TableCell className="pl-4 font-medium">
+                          {row.vendor}
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums">
+                          {formatCurrency(row.current)}
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums">
+                          {formatCurrency(row.days1to30)}
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums">
+                          {formatCurrency(row.days31to60)}
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums">
+                          {formatCurrency(row.days61to90)}
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums">
+                          {formatCurrency(row.over90)}
+                        </TableCell>
+                        <TableCell className="pr-4 text-right font-semibold tabular-nums">
+                          {formatCurrency(row.total)}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                    <TableRow className="bg-muted/40 font-semibold hover:bg-muted/40">
+                      <TableCell className="pl-4">Total</TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {formatCurrency(totals.current)}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {formatCurrency(totals.days1to30)}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {formatCurrency(totals.days31to60)}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {formatCurrency(totals.days61to90)}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {formatCurrency(totals.over90)}
+                      </TableCell>
+                      <TableCell className="pr-4 text-right tabular-nums">
+                        {formatCurrency(totals.total)}
+                      </TableCell>
+                    </TableRow>
+                  </>
+                )}
               </TableBody>
             </Table>
           </CardContent>

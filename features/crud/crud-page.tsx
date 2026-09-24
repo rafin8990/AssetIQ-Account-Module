@@ -1,7 +1,8 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { MoreHorizontal, Pencil, Plus, Search, Trash2 } from "lucide-react";
+import { MoreHorizontal, Pencil, Plus, Printer, Search, Trash2 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -249,7 +250,7 @@ export function CrudPage({ config }: { config: CrudPageConfig }) {
               </CardTitle>
               <CardDescription>
                 {isLive
-                  ? "Live data from Accounts API"
+                  ? config.apiSourceLabel ?? "Live data from Accounts API"
                   : "Dummy CRUD — create, edit, and delete locally"}
               </CardDescription>
             </div>
@@ -326,6 +327,16 @@ export function CrudPage({ config }: { config: CrudPageConfig }) {
                             <Pencil className="size-4" />
                             Edit
                           </DropdownMenuItem>
+                          {(config.extraActions ?? []).map((action) =>
+                            action.href ? (
+                              <DropdownMenuItem key={action.label} asChild>
+                                <Link href={action.href(row)}>
+                                  <Printer className="size-4" />
+                                  {action.label}
+                                </Link>
+                              </DropdownMenuItem>
+                            ) : null
+                          )}
                           <DropdownMenuItem
                             variant="destructive"
                             onClick={() => void handleDelete(row.id)}

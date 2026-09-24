@@ -70,6 +70,7 @@ import {
   cashPosition,
   departmentPerformance,
   formatCurrency,
+  formatCurrencyCompact,
   formatPercent,
   incomeMix,
   insights,
@@ -279,7 +280,7 @@ export function AnalyticsOverview() {
                   axisLine={false}
                   tickMargin={8}
                   width={48}
-                  tickFormatter={(value) => `$${value / 1000}k`}
+                  tickFormatter={(value) => formatCurrencyCompact(Number(value))}
                 />
                 <ChartTooltip
                   content={
@@ -456,7 +457,7 @@ export function AnalyticsOverview() {
                   axisLine={false}
                   tickMargin={8}
                   width={48}
-                  tickFormatter={(value) => `$${value / 1000}k`}
+                  tickFormatter={(value) => formatCurrencyCompact(Number(value))}
                 />
                 <ChartTooltip
                   content={
@@ -507,7 +508,7 @@ export function AnalyticsOverview() {
                   type="number"
                   tickLine={false}
                   axisLine={false}
-                  tickFormatter={(value) => `$${value / 1000}k`}
+                  tickFormatter={(value) => formatCurrencyCompact(Number(value))}
                 />
                 <YAxis
                   type="category"

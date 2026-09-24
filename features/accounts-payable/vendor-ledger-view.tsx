@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import {
@@ -27,19 +27,120 @@ import {
 } from "@/components/ui/table";
 
 import {
-  formatCurrency,
-  formatDate,
-  suppliers,
-  vendorLedger,
-} from "./data";
+  listSupplierBills,
+  type SupplierBill,
+} from "@/features/accounts-payable/api/supplier-bills";
+import { listVendors } from "@/features/accounts-payable/api/vendors";
+import { formatCurrency, formatDate } from "./data";
+
+type LedgerRow = {
+  id: string;
+  date: string;
+  reference: string;
+  description: string;
+  debit: number;
+  credit: number;
+  balance: number;
+};
+
+function buildLedger(bills: SupplierBill[]): LedgerRow[] {
+  const events: Omit<LedgerRow, "balance">[] = [];
+
+  for (const bill of bills) {
+    events.push({
+      id: `${bill.id}-bill`,
+      date: bill.issueDate,
+      reference: bill.billNo,
+      description: bill.sourcePoCode
+        ? `Purchase bill · ${bill.sourcePoCode}`
+        : "Purchase bill",
+      debit: 0,
+      credit: bill.amount,
+    });
+
+    if (bill.paid > 0) {
+      events.push({
+        id: `${bill.id}-pay`,
+        date: bill.dueDate || bill.issueDate,
+        reference: `PAY-${bill.billNo}`,
+        description: bill.sourcePoCode
+          ? `Payment · ${bill.sourcePoCode}`
+          : "Payment",
+        debit: bill.paid,
+        credit: 0,
+      });
+    }
+  }
+
+  events.sort((a, b) => {
+    const byDate = a.date.localeCompare(b.date);
+    if (byDate !== 0) return byDate;
+    return a.reference.localeCompare(b.reference);
+  });
+
+  // AP party ledger: bills credit liability, payments debit it down
+  let running = 0;
+  return events.map((event) => {
+    running += event.credit - event.debit;
+    return { ...event, balance: running };
+  });
+}
 
 export function VendorLedgerView() {
-  const [supplier, setSupplier] = useState(suppliers[0]?.name ?? "");
+  const [bills, setBills] = useState<SupplierBill[]>([]);
+  const [vendorNames, setVendorNames] = useState<string[]>([]);
+  const [vendor, setVendor] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  const rows = useMemo(
-    () => vendorLedger.filter((entry) => entry.supplier === supplier),
-    [supplier]
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const [billRows, vendorRows] = await Promise.all([
+        listSupplierBills(),
+        listVendors().catch(() => [] as Awaited<ReturnType<typeof listVendors>>),
+      ]);
+
+      setBills(billRows);
+
+      const fromMaster = vendorRows
+        .map((row) => String(row.vendor_name ?? "").trim())
+        .filter(Boolean);
+      const fromBills = billRows
+        .map((row) => row.vendor.trim())
+        .filter(Boolean);
+      const names = Array.from(new Set([...fromMaster, ...fromBills])).sort(
+        (a, b) => a.localeCompare(b)
+      );
+
+      setVendorNames(names);
+      setVendor((current) => {
+        if (current && names.includes(current)) return current;
+        const withActivity = names.find((name) =>
+          billRows.some((bill) => bill.vendor === name)
+        );
+        return withActivity ?? names[0] ?? "";
+      });
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Failed to load vendor ledger"
+      );
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const vendorBills = useMemo(
+    () => bills.filter((row) => row.vendor === vendor),
+    [bills, vendor]
   );
+
+  const rows = useMemo(() => buildLedger(vendorBills), [vendorBills]);
 
   const closing = rows.at(-1)?.balance ?? 0;
   const totalDebit = rows.reduce((sum, row) => sum + row.debit, 0);
@@ -53,22 +154,32 @@ export function VendorLedgerView() {
             Vendor Ledger
           </h2>
           <p className="text-sm text-muted-foreground">
-            Running payable history for a selected supplier/vendor.
+            Live AP statement from supplier bills and payments (Accounts API).
           </p>
         </div>
-        <Select value={supplier} onValueChange={setSupplier}>
+        <Select
+          value={vendor || undefined}
+          onValueChange={setVendor}
+          disabled={loading || !vendorNames.length}
+        >
           <SelectTrigger className="w-full sm:w-64">
-            <SelectValue placeholder="Select supplier" />
+            <SelectValue placeholder="Select vendor" />
           </SelectTrigger>
           <SelectContent>
-            {suppliers.map((item) => (
-              <SelectItem key={item.id} value={item.name}>
-                {item.name}
+            {vendorNames.map((name) => (
+              <SelectItem key={name} value={name}>
+                {name}
               </SelectItem>
             ))}
           </SelectContent>
         </Select>
       </div>
+
+      {error ? (
+        <div className="rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+          {error}
+        </div>
+      ) : null}
 
       <div className="grid gap-3 sm:grid-cols-3">
         <Card className="border-0 bg-card/90 shadow-sm ring-border/60">
@@ -77,7 +188,7 @@ export function VendorLedgerView() {
               Payments (Debit)
             </p>
             <p className="mt-1 text-xl font-semibold text-emerald-700 tabular-nums">
-              {formatCurrency(totalDebit)}
+              {loading ? "…" : formatCurrency(totalDebit)}
             </p>
           </CardContent>
         </Card>
@@ -87,7 +198,7 @@ export function VendorLedgerView() {
               Bills (Credit)
             </p>
             <p className="mt-1 text-xl font-semibold tabular-nums">
-              {formatCurrency(totalCredit)}
+              {loading ? "…" : formatCurrency(totalCredit)}
             </p>
           </CardContent>
         </Card>
@@ -97,7 +208,7 @@ export function VendorLedgerView() {
               Closing payable
             </p>
             <p className="mt-1 text-xl font-semibold text-primary tabular-nums">
-              {formatCurrency(closing)}
+              {loading ? "…" : formatCurrency(closing)}
             </p>
           </CardContent>
         </Card>
@@ -107,8 +218,12 @@ export function VendorLedgerView() {
         <CardHeader className="border-b border-border/60 pb-4">
           <div className="flex items-center justify-between gap-3">
             <div>
-              <CardTitle className="text-base">{supplier}</CardTitle>
-              <CardDescription>{rows.length} ledger entr(y/ies)</CardDescription>
+              <CardTitle className="text-base">
+                {vendor || "Select a vendor"}
+              </CardTitle>
+              <CardDescription>
+                {loading ? "Loading…" : `${rows.length} ledger entr(y/ies)`}
+              </CardDescription>
             </div>
             <Badge variant="secondary">AP Ledger</Badge>
           </div>
@@ -126,13 +241,22 @@ export function VendorLedgerView() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {rows.length === 0 ? (
+              {loading ? (
                 <TableRow>
                   <TableCell
                     colSpan={6}
                     className="h-24 text-center text-muted-foreground"
                   >
-                    No ledger entries for this supplier.
+                    Loading…
+                  </TableCell>
+                </TableRow>
+              ) : rows.length === 0 ? (
+                <TableRow>
+                  <TableCell
+                    colSpan={6}
+                    className="h-24 text-center text-muted-foreground"
+                  >
+                    No ledger entries for this vendor.
                   </TableCell>
                 </TableRow>
               ) : (

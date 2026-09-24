@@ -1,4 +1,9 @@
 import { env } from "@/config/env";
+import {
+  clearSession,
+  getAccessToken,
+  isAccessTokenExpired,
+} from "@/lib/auth-storage";
 
 export type ApiMeta = {
   page?: number;
@@ -32,7 +37,36 @@ type RequestOptions = {
   body?: unknown;
   params?: Record<string, string | number | boolean | undefined | null>;
   signal?: AbortSignal;
+  skipAuth?: boolean;
 };
+
+let endingSession = false;
+
+function isJwtSessionFailure(status?: number, message?: string): boolean {
+  if (status === 401) return true;
+  const normalized = (message ?? "").toLowerCase();
+  return (
+    normalized.includes("jwt expired") ||
+    normalized.includes("jwt malformed") ||
+    normalized.includes("invalid token") ||
+    normalized.includes("invalid signature") ||
+    normalized.includes("tokenexpirederror") ||
+    normalized.includes("jsonwebtokenerror")
+  );
+}
+
+function redirectToLogin(): void {
+  if (typeof window === "undefined") return;
+  if (window.location.pathname.startsWith("/login")) return;
+  window.location.assign("/login");
+}
+
+function endExpiredSession(): void {
+  if (typeof window === "undefined" || endingSession) return;
+  endingSession = true;
+  clearSession();
+  redirectToLogin();
+}
 
 function createApiClient(baseUrl: string) {
   function buildUrl(
@@ -58,15 +92,41 @@ function createApiClient(baseUrl: string) {
     path: string,
     options: RequestOptions = {}
   ): Promise<T> {
-    const { method = "GET", body, params, signal } = options;
+    const { method = "GET", body, params, signal, skipAuth } = options;
+    const headers: Record<string, string> = {
+      Accept: "application/json",
+    };
+
+    const isFormData =
+      typeof FormData !== "undefined" && body instanceof FormData;
+    if (body !== undefined && !isFormData) {
+      headers["Content-Type"] = "application/json";
+    }
+
+    if (!skipAuth) {
+      const token = getAccessToken();
+      if (token) {
+        if (isAccessTokenExpired(token)) {
+          endExpiredSession();
+          throw new ApiError(
+            "Your session has expired. Please sign in again.",
+            401
+          );
+        }
+        headers.Authorization = `Bearer ${token}`;
+      }
+    }
+
     const response = await fetch(buildUrl(path, params), {
       method,
       signal,
-      headers: {
-        Accept: "application/json",
-        ...(body !== undefined ? { "Content-Type": "application/json" } : {}),
-      },
-      body: body !== undefined ? JSON.stringify(body) : undefined,
+      headers,
+      body:
+        body === undefined
+          ? undefined
+          : isFormData
+            ? (body as FormData)
+            : JSON.stringify(body),
     });
 
     let payload: ApiEnvelope<T> | T | null = null;
@@ -80,6 +140,21 @@ function createApiClient(baseUrl: string) {
           response.status
         );
       }
+    }
+
+    const message =
+      payload &&
+      typeof payload === "object" &&
+      "message" in payload &&
+      typeof (payload as ApiEnvelope<T>).message === "string"
+        ? (payload as ApiEnvelope<T>).message || undefined
+        : undefined;
+
+    if (
+      !skipAuth &&
+      isJwtSessionFailure(response.status, message)
+    ) {
+      endExpiredSession();
     }
 
     if (
@@ -134,3 +209,4 @@ function createApiClient(baseUrl: string) {
 
 export const accountsApi = createApiClient(env.accountsUrl);
 export const assetApi = createApiClient(env.assetUrl);
+export const vendorApi = createApiClient(env.vendorUrl);

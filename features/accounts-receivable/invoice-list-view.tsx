@@ -1,9 +1,11 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { Search } from "lucide-react";
+import Link from "next/link";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Banknote, Printer, Search } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
@@ -23,13 +25,11 @@ import {
 import { cn } from "@/lib/utils";
 
 import {
-  formatCurrency,
-  formatDate,
-  getDueOverdueInvoices,
-  getOutstandingInvoices,
+  listCustomerInvoices,
   type CustomerInvoice,
   type InvoiceStatus,
-} from "./data";
+} from "@/features/accounts-receivable/api/customer-invoices";
+import { formatCurrency, formatDate } from "./data";
 
 const statusTone: Record<InvoiceStatus, string> = {
   draft: "bg-slate-100 text-slate-700",
@@ -46,17 +46,17 @@ type InvoiceListViewProps = {
 };
 
 function daysPastDue(dueDate: string) {
-  const due = new Date(dueDate).getTime();
-  const today = new Date("2026-03-21").getTime();
-  return Math.max(0, Math.floor((today - due) / (1000 * 60 * 60 * 24)));
+  const due = new Date(`${dueDate}T00:00:00`).getTime();
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return Math.max(0, Math.floor((today.getTime() - due) / (1000 * 60 * 60 * 24)));
 }
 
 export function InvoiceListView({ variant }: InvoiceListViewProps) {
   const [query, setQuery] = useState("");
-  const source =
-    variant === "outstanding"
-      ? getOutstandingInvoices()
-      : getDueOverdueInvoices();
+  const [rows, setRows] = useState<CustomerInvoice[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   const title =
     variant === "outstanding"
@@ -64,27 +64,52 @@ export function InvoiceListView({ variant }: InvoiceListViewProps) {
       : "Due / Overdue Invoices";
   const description =
     variant === "outstanding"
-      ? "All open customer invoices with remaining balances."
-      : "Invoices that are due soon or already past due.";
+      ? "Open order invoices with remaining balance."
+      : "Open order invoices due today or already past due (live from Accounts API).";
 
-  const rows = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    let list: CustomerInvoice[] = source;
-    if (variant === "due-overdue") {
-      list = [...source].sort(
-        (a, b) => daysPastDue(b.dueDate) - daysPastDue(a.dueDate)
+  const loadRows = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await listCustomerInvoices({
+        outstanding: variant === "outstanding" ? true : undefined,
+        dueOverdue: variant === "due-overdue" ? true : undefined,
+        searchTerm: query.trim() || undefined,
+        invoiceKind: "order",
+      });
+      const orderOnly = data.filter(
+        (invoice) => invoice.invoiceKind !== "payment" && invoice.balance > 0
       );
+      const sorted =
+        variant === "due-overdue"
+          ? [...orderOnly].sort(
+              (a, b) => daysPastDue(b.dueDate) - daysPastDue(a.dueDate)
+            )
+          : orderOnly;
+      setRows(sorted);
+    } catch (err) {
+      setRows([]);
+      setError(
+        err instanceof Error ? err.message : "Failed to load invoices"
+      );
+    } finally {
+      setLoading(false);
     }
-    if (!q) return list;
-    return list.filter(
-      (invoice) =>
-        invoice.invoiceNo.toLowerCase().includes(q) ||
-        invoice.customer.toLowerCase().includes(q)
-    );
-  }, [query, source, variant]);
+  }, [query, variant]);
 
-  const totalBalance = rows.reduce((sum, row) => sum + row.balance, 0);
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void loadRows();
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [loadRows]);
+
+  const totalBalance = useMemo(
+    () => rows.reduce((sum, row) => sum + row.balance, 0),
+    [rows]
+  );
   const overdueCount = rows.filter((row) => row.status === "overdue").length;
+  const colSpan = variant === "due-overdue" ? 10 : 9;
 
   return (
     <div className="flex flex-col gap-5">
@@ -93,11 +118,19 @@ export function InvoiceListView({ variant }: InvoiceListViewProps) {
         <p className="text-sm text-muted-foreground">{description}</p>
       </div>
 
+      {error ? (
+        <div className="rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+          {error}
+        </div>
+      ) : null}
+
       <div className="grid gap-3 sm:grid-cols-3">
         <Card className="border-0 bg-card/90 shadow-sm ring-border/60">
           <CardContent className="pt-5">
             <p className="text-xs text-muted-foreground uppercase">Invoices</p>
-            <p className="mt-1 text-xl font-semibold">{rows.length}</p>
+            <p className="mt-1 text-xl font-semibold">
+              {loading ? "…" : rows.length}
+            </p>
           </CardContent>
         </Card>
         <Card className="border-0 bg-card/90 shadow-sm ring-border/60">
@@ -125,14 +158,20 @@ export function InvoiceListView({ variant }: InvoiceListViewProps) {
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <CardTitle className="text-base">{title}</CardTitle>
-              <CardDescription>{rows.length} invoice(s)</CardDescription>
+              <CardDescription>
+                {loading
+                  ? "Loading…"
+                  : variant === "due-overdue"
+                    ? `${rows.length} due/overdue order invoice(s)`
+                    : `${rows.length} order invoice(s)`}
+              </CardDescription>
             </div>
             <div className="relative w-full sm:max-w-64">
               <Search className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
               <Input
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search invoice or customer…"
+                placeholder="Search invoice, order, or customer…"
                 className="h-8 pl-8"
               />
             </div>
@@ -143,59 +182,119 @@ export function InvoiceListView({ variant }: InvoiceListViewProps) {
             <TableHeader>
               <TableRow className="hover:bg-transparent">
                 <TableHead className="pl-4">Invoice</TableHead>
+                <TableHead>Kind</TableHead>
+                <TableHead>Order</TableHead>
                 <TableHead>Customer</TableHead>
                 <TableHead>Due date</TableHead>
                 {variant === "due-overdue" ? (
                   <TableHead>Days past due</TableHead>
                 ) : null}
                 <TableHead>Status</TableHead>
-                <TableHead className="pr-4 text-right">Balance</TableHead>
+                <TableHead className="text-right">Balance</TableHead>
+                <TableHead className="pr-4 text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {rows.map((invoice) => {
-                const overdueDays = daysPastDue(invoice.dueDate);
-                return (
-                  <TableRow key={invoice.id}>
-                    <TableCell className="pl-4 font-medium">
-                      {invoice.invoiceNo}
-                    </TableCell>
-                    <TableCell>{invoice.customer}</TableCell>
-                    <TableCell className="text-muted-foreground tabular-nums">
-                      {formatDate(invoice.dueDate)}
-                    </TableCell>
-                    {variant === "due-overdue" ? (
+              {loading ? (
+                <TableRow>
+                  <TableCell
+                    colSpan={colSpan}
+                    className="h-24 text-center text-muted-foreground"
+                  >
+                    Loading…
+                  </TableCell>
+                </TableRow>
+              ) : rows.length === 0 ? (
+                <TableRow>
+                  <TableCell
+                    colSpan={colSpan}
+                    className="h-24 text-center text-muted-foreground"
+                  >
+                    No{" "}
+                    {variant === "due-overdue"
+                      ? "due or overdue order invoices"
+                      : "open order invoices"}{" "}
+                    found.
+                  </TableCell>
+                </TableRow>
+              ) : (
+                rows.map((invoice) => {
+                  const overdueDays = daysPastDue(invoice.dueDate);
+                  return (
+                    <TableRow key={invoice.id}>
+                      <TableCell className="pl-4 font-medium">
+                        {invoice.invoiceNo}
+                      </TableCell>
+                      <TableCell>
+                        <Badge
+                          variant="secondary"
+                          className="border-0 capitalize"
+                        >
+                          {invoice.invoiceKind}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-muted-foreground">
+                        {invoice.sourceOrderCode || "—"}
+                      </TableCell>
+                      <TableCell>{invoice.customer}</TableCell>
+                      <TableCell className="text-muted-foreground tabular-nums">
+                        {formatDate(invoice.dueDate)}
+                      </TableCell>
+                      {variant === "due-overdue" ? (
+                        <TableCell>
+                          <Badge
+                            variant="secondary"
+                            className={cn(
+                              "border-0",
+                              overdueDays > 0
+                                ? "bg-rose-50 text-rose-700"
+                                : "bg-sky-50 text-sky-700"
+                            )}
+                          >
+                            {overdueDays > 0 ? `${overdueDays}d` : "Due soon"}
+                          </Badge>
+                        </TableCell>
+                      ) : null}
                       <TableCell>
                         <Badge
                           variant="secondary"
                           className={cn(
-                            "border-0",
-                            overdueDays > 0
-                              ? "bg-rose-50 text-rose-700"
-                              : "bg-sky-50 text-sky-700"
+                            "border-0 capitalize",
+                            statusTone[invoice.status]
                           )}
                         >
-                          {overdueDays > 0 ? `${overdueDays}d` : "Due soon"}
+                          {invoice.status}
                         </Badge>
                       </TableCell>
-                    ) : null}
-                    <TableCell>
-                      <Badge
-                        variant="secondary"
-                        className={cn(
-                          "border-0 capitalize",
-                          statusTone[invoice.status]
-                        )}
-                      >
-                        {invoice.status}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="pr-4 text-right font-semibold tabular-nums">
-                      {formatCurrency(invoice.balance)}
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
+                      <TableCell className="text-right font-semibold tabular-nums">
+                        {formatCurrency(invoice.balance)}
+                      </TableCell>
+                      <TableCell className="pr-4 text-right">
+                        <div className="inline-flex items-center justify-end gap-1">
+                          <Button variant="ghost" size="icon-sm" asChild>
+                            <Link
+                              href="/accounts-receivable/receive-payment"
+                              aria-label={`Receive payment for ${invoice.invoiceNo}`}
+                              title="Receive payment"
+                            >
+                              <Banknote className="size-4" />
+                            </Link>
+                          </Button>
+                          <Button variant="ghost" size="icon-sm" asChild>
+                            <Link
+                              href={`/accounts-receivable/customer-invoices/print?no=${encodeURIComponent(invoice.invoiceNo)}`}
+                              aria-label={`Print ${invoice.invoiceNo}`}
+                              title="Print"
+                            >
+                              <Printer className="size-4" />
+                            </Link>
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })
+              )}
             </TableBody>
           </Table>
         </CardContent>

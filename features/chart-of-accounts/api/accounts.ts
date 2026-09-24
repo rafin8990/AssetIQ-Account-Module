@@ -54,11 +54,57 @@ function toPayload(data: Record<string, string | number>): AccountPayload {
   };
 }
 
-export async function listAccounts(): Promise<CrudRow[]> {
+export async function listAccounts(options?: {
+  type?: AccountType;
+  status?: AccountStatus;
+  searchTerm?: string;
+}): Promise<CrudRow[]> {
   const accounts = await accountsApi.get<Account[]>("/accounts", {
-    params: { page: 1, limit: 200, sortBy: "created_at", sortOrder: "desc" },
+    params: {
+      page: 1,
+      limit: 200,
+      sortBy: "created_at",
+      sortOrder: "desc",
+      type: options?.type,
+      status: options?.status,
+      searchTerm: options?.searchTerm,
+    },
   });
   return accounts.map(toRow);
+}
+
+export async function listCashAccountRows(): Promise<CrudRow[]> {
+  return listAccounts({ type: "cash" });
+}
+
+export async function createCashAccount(
+  data: Record<string, string | number>
+): Promise<CrudRow> {
+  return createAccount({ ...data, type: "cash" });
+}
+
+export async function updateCashAccount(
+  id: string,
+  data: Record<string, string | number>
+): Promise<CrudRow> {
+  return updateAccount(id, { ...data, type: "cash" });
+}
+
+export async function listBankAccountRows(): Promise<CrudRow[]> {
+  return listAccounts({ type: "bank" });
+}
+
+export async function createBankAccount(
+  data: Record<string, string | number>
+): Promise<CrudRow> {
+  return createAccount({ ...data, type: "bank" });
+}
+
+export async function updateBankAccount(
+  id: string,
+  data: Record<string, string | number>
+): Promise<CrudRow> {
+  return updateAccount(id, { ...data, type: "bank" });
 }
 
 export async function createAccount(

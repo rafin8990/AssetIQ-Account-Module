@@ -1,10 +1,5 @@
-import { TransactionEntryForm } from "@/features/transactions/transaction-entry-form";
+import { ExpenseEntryView } from "@/features/transactions/expense-entry-view";
 
 export default function ExpenseEntryPage() {
-  return (
-    <TransactionEntryForm
-      kind="expense"
-      description="Record business expenses paid from cash, bank, or card accounts."
-    />
-  );
+  return <ExpenseEntryView />;
 }

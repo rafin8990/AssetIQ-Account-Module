@@ -1,10 +1,5 @@
-import { TransactionEntryForm } from "@/features/transactions/transaction-entry-form";
+import { CashTransactionView } from "@/features/transactions/cash-transaction-view";
 
 export default function CashTransactionPage() {
-  return (
-    <TransactionEntryForm
-      kind="cash"
-      description="Log cash-in-hand receipts and payments for day-to-day operations."
-    />
-  );
+  return <CashTransactionView />;
 }

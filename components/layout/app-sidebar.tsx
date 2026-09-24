@@ -1,11 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { usePathname } from "next/navigation";
-import { ChevronRight, Landmark } from "lucide-react";
+import { ChevronRight, Landmark, LogOut } from "lucide-react";
 
 import { mainNavigation, type NavItem } from "@/config/navigation";
+import { useAuth } from "@/features/auth/AuthProvider";
+import { filterNavigation } from "@/lib/permissions";
 import {
   Collapsible,
   CollapsibleContent,
@@ -27,6 +29,7 @@ import {
   SidebarRail,
 } from "@/components/ui/sidebar";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 function isPathActive(pathname: string, href: string) {
@@ -34,8 +37,8 @@ function isPathActive(pathname: string, href: string) {
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
-function getActiveDropdownHref(pathname: string) {
-  for (const item of mainNavigation) {
+function getActiveDropdownHref(pathname: string, items: NavItem[]) {
+  for (const item of items) {
     if (!item.children?.length) continue;
     if (item.children.some((child) => isPathActive(pathname, child.href))) {
       return item.href;
@@ -45,6 +48,13 @@ function getActiveDropdownHref(pathname: string) {
     }
   }
   return null;
+}
+
+function initials(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return "?";
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return `${parts[0][0] ?? ""}${parts[1][0] ?? ""}`.toUpperCase();
 }
 
 function NavMenuItem({
@@ -147,17 +157,25 @@ function NavMenuItem({
 
 export function AppSidebar() {
   const pathname = usePathname();
+  const { user, logout } = useAuth();
+  const navigation = useMemo(
+    () => filterNavigation(mainNavigation, user),
+    [user]
+  );
   const [openDropdown, setOpenDropdown] = useState<string | null>(() =>
-    getActiveDropdownHref(pathname)
+    getActiveDropdownHref(pathname, navigation)
   );
 
   useEffect(() => {
-    setOpenDropdown(getActiveDropdownHref(pathname));
-  }, [pathname]);
+    setOpenDropdown(getActiveDropdownHref(pathname, navigation));
+  }, [pathname, navigation]);
 
   function handleOpenChange(href: string, open: boolean) {
     setOpenDropdown(open ? href : null);
   }
+
+  const displayName = user?.name || user?.employee_code || "User";
+  const displayEmail = user?.email || user?.employee_code || "";
 
   return (
     <Sidebar collapsible="icon" className="border-r border-sidebar-border print:hidden">
@@ -184,7 +202,7 @@ export function AppSidebar() {
         <SidebarGroup className="p-0">
           <SidebarGroupContent>
             <SidebarMenu className="gap-0.5">
-              {mainNavigation.map((item) => (
+              {navigation.map((item) => (
                 <NavMenuItem
                   key={item.href}
                   item={item}
@@ -202,17 +220,27 @@ export function AppSidebar() {
         <div className="flex items-center gap-2.5 overflow-hidden rounded-lg px-1.5 py-1.5 group-data-[collapsible=icon]:justify-center">
           <Avatar size="sm">
             <AvatarFallback className="bg-primary/15 text-[10px] font-semibold text-primary">
-              AD
+              {initials(displayName)}
             </AvatarFallback>
           </Avatar>
           <div className="min-w-0 flex-1 group-data-[collapsible=icon]:hidden">
             <p className="truncate text-xs font-medium text-sidebar-foreground">
-              Admin User
+              {displayName}
             </p>
             <p className="truncate text-[11px] text-muted-foreground">
-              admin@assetiq.io
+              {displayEmail}
             </p>
           </div>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="size-7 shrink-0 text-muted-foreground group-data-[collapsible=icon]:hidden"
+            onClick={logout}
+            aria-label="Sign out"
+          >
+            <LogOut className="size-3.5" />
+          </Button>
         </div>
       </SidebarFooter>
 

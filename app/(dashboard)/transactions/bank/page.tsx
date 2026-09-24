@@ -1,10 +1,5 @@
-import { TransactionEntryForm } from "@/features/transactions/transaction-entry-form";
+import { BankTransactionView } from "@/features/transactions/bank-transaction-view";
 
 export default function BankTransactionPage() {
-  return (
-    <TransactionEntryForm
-      kind="bank"
-      description="Record bank deposits, withdrawals, and cheque-based settlements."
-    />
-  );
+  return <BankTransactionView />;
 }

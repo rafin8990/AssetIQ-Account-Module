@@ -3,11 +3,9 @@ import {
   Wallet,
   Receipt,
   Settings,
-  PieChart,
   BookOpen,
   Layers,
   Network,
-  Hash,
   Scale,
   Tags,
   Ticket,
@@ -38,31 +36,8 @@ import {
   ArrowUpFromLine,
   Scale3d,
   NotebookTabs,
-  Target,
-  PlusCircle,
-  Building,
-  GitBranch,
-  FolderKanban,
-  Boxes,
-  ChartNoAxesCombined,
-  Diff,
-  Calculator,
-  ScrollText,
-  Library,
-  BookCopy,
-  DoorOpen,
-  DoorClosed,
-  SlidersHorizontal,
+  Coins,
   CalendarRange,
-  CalendarDays,
-  Lock,
-  Package,
-  ShoppingCart,
-  TrendingDown,
-  Layers2,
-  Recycle,
-  RefreshCw,
-  FileOutput,
   FileBarChart,
   Sheet,
   Waves,
@@ -70,16 +45,7 @@ import {
   TrendingUp,
   ArrowDownCircle,
   Clock3,
-  Percent,
-  BadgeCheck,
-  BadgeX,
-  Hourglass,
-  UsersRound,
-  Gauge,
-  ShieldCheck,
-  Activity,
-  Coins,
-  Workflow,
+  Library,
   type LucideIcon,
 } from "lucide-react";
 
@@ -90,9 +56,9 @@ export type NavItem = {
   children?: NavItem[];
 };
 
+/** Sidebar: Dashboard + API-connected pages only. */
 export const mainNavigation: NavItem[] = [
   { title: "Dashboard", href: "/", icon: LayoutDashboard },
-  { title: "Analytics", href: "/analytics", icon: PieChart },
   {
     title: "Chart Of Accounts",
     href: "/chart-of-accounts",
@@ -333,126 +299,6 @@ export const mainNavigation: NavItem[] = [
     ],
   },
   {
-    title: "Budget & Cost Center",
-    href: "/budget",
-    icon: Target,
-    children: [
-      { title: "Create Budget", href: "/budget/create", icon: PlusCircle },
-      {
-        title: "Department Budget",
-        href: "/budget/department",
-        icon: Building,
-      },
-      { title: "Branch Budget", href: "/budget/branch", icon: GitBranch },
-      {
-        title: "Project Budget",
-        href: "/budget/project",
-        icon: FolderKanban,
-      },
-      { title: "Cost Centers", href: "/budget/cost-centers", icon: Boxes },
-      {
-        title: "Budget vs Actual",
-        href: "/budget/vs-actual",
-        icon: ChartNoAxesCombined,
-      },
-      { title: "Variance Report", href: "/budget/variance", icon: Diff },
-    ],
-  },
-  {
-    title: "General Accounting",
-    href: "/general-accounting",
-    icon: Calculator,
-    children: [
-      {
-        title: "Journal Entries",
-        href: "/general-accounting/journal-entries",
-        icon: ScrollText,
-      },
-      {
-        title: "General Ledger",
-        href: "/general-accounting/general-ledger",
-        icon: Library,
-      },
-      {
-        title: "Subsidiary Ledger",
-        href: "/general-accounting/subsidiary-ledger",
-        icon: BookCopy,
-      },
-      {
-        title: "Opening Balance",
-        href: "/general-accounting/opening-balance",
-        icon: DoorOpen,
-      },
-      {
-        title: "Closing Entries",
-        href: "/general-accounting/closing-entries",
-        icon: DoorClosed,
-      },
-      {
-        title: "Adjusting Entries",
-        href: "/general-accounting/adjusting-entries",
-        icon: SlidersHorizontal,
-      },
-      {
-        title: "Fiscal Year",
-        href: "/general-accounting/fiscal-year",
-        icon: CalendarRange,
-      },
-      {
-        title: "Accounting Period",
-        href: "/general-accounting/accounting-period",
-        icon: CalendarDays,
-      },
-      {
-        title: "Period Closing/Locking",
-        href: "/general-accounting/period-locking",
-        icon: Lock,
-      },
-    ],
-  },
-  {
-    title: "Fixed Assets Accounting",
-    href: "/fixed-assets",
-    icon: Package,
-    children: [
-      {
-        title: "Asset Accounts",
-        href: "/fixed-assets/asset-accounts",
-        icon: Layers2,
-      },
-      {
-        title: "Asset Purchase",
-        href: "/fixed-assets/purchase",
-        icon: ShoppingCart,
-      },
-      {
-        title: "Depreciation",
-        href: "/fixed-assets/depreciation",
-        icon: TrendingDown,
-      },
-      {
-        title: "Accumulated Depreciation",
-        href: "/fixed-assets/accumulated-depreciation",
-        icon: Scale,
-      },
-      {
-        title: "Asset Disposal",
-        href: "/fixed-assets/disposal",
-        icon: Recycle,
-      },
-      {
-        title: "Asset Revaluation",
-        href: "/fixed-assets/revaluation",
-        icon: RefreshCw,
-      },
-      {
-        title: "Depreciation Journal Posting",
-        href: "/fixed-assets/depreciation-posting",
-        icon: FileOutput,
-      },
-    ],
-  },
-  {
     title: "Reports",
     href: "/reports",
     icon: FileBarChart,
@@ -501,54 +347,6 @@ export const mainNavigation: NavItem[] = [
         href: "/reports/cash-bank",
         icon: Landmark,
       },
-      { title: "VAT & Tax Report", href: "/reports/vat-tax", icon: Percent },
-      {
-        title: "Budget vs Actual",
-        href: "/reports/budget-vs-actual",
-        icon: ChartNoAxesCombined,
-      },
-    ],
-  },
-  {
-    title: "Approval & Audit",
-    href: "/approval-audit",
-    icon: ShieldCheck,
-    children: [
-      {
-        title: "Pending Approvals",
-        href: "/approval-audit/pending",
-        icon: Hourglass,
-      },
-      {
-        title: "Approved Transactions",
-        href: "/approval-audit/approved",
-        icon: BadgeCheck,
-      },
-      {
-        title: "Rejected Transactions",
-        href: "/approval-audit/rejected",
-        icon: BadgeX,
-      },
-      {
-        title: "Maker–Checker–Approver",
-        href: "/approval-audit/maker-checker",
-        icon: UsersRound,
-      },
-      {
-        title: "Approval Limits",
-        href: "/approval-audit/limits",
-        icon: Gauge,
-      },
-      {
-        title: "Audit Trail",
-        href: "/approval-audit/audit-trail",
-        icon: ScrollText,
-      },
-      {
-        title: "Activity Log",
-        href: "/approval-audit/activity-log",
-        icon: Activity,
-      },
     ],
   },
   {
@@ -562,42 +360,6 @@ export const mainNavigation: NavItem[] = [
         icon: CalendarRange,
       },
       { title: "Currency", href: "/settings/currency", icon: Coins },
-      {
-        title: "Account Settings",
-        href: "/settings/account-settings",
-        icon: SlidersHorizontal,
-      },
-      {
-        title: "Voucher Number Format",
-        href: "/settings/voucher-number-format",
-        icon: Hash,
-      },
-      {
-        title: "Payment Methods",
-        href: "/settings/payment-methods",
-        icon: CreditCard,
-      },
-      {
-        title: "Tax/VAT Rates",
-        href: "/settings/tax-vat-rates",
-        icon: Percent,
-      },
-      {
-        title: "Cost Centers",
-        href: "/settings/cost-centers",
-        icon: Boxes,
-      },
-      { title: "Branches", href: "/settings/branches", icon: Building2 },
-      {
-        title: "Roles & Permissions",
-        href: "/settings/roles-permissions",
-        icon: Lock,
-      },
-      {
-        title: "Approval Workflow",
-        href: "/settings/approval-workflow",
-        icon: Workflow,
-      },
     ],
   },
 ];
