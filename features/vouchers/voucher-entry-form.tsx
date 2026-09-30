@@ -64,9 +64,16 @@ type VoucherEntryFormProps = {
   description: string;
 };
 
+function createLineId() {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return `line-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
 function createLine(): LineDraft {
   return {
-    id: crypto.randomUUID(),
+    id: createLineId(),
     accountId: "",
     narration: "",
     debit: "",
