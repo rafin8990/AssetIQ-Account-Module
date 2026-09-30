@@ -62,7 +62,7 @@ export function DashboardOverview() {
           Dashboard
         </h2>
         <p className="text-sm text-muted-foreground">
-          Income, expenses, balances, and payment health at a glance.
+          Income, expenses, and cash.
         </p>
       </div>
 

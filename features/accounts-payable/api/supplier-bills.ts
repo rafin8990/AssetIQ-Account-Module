@@ -147,6 +147,11 @@ export async function updateSupplierBill(
   return toRow(mapBill(updated));
 }
 
+export async function getSupplierBill(id: string): Promise<SupplierBill> {
+  const row = await accountsApi.get<ApiSupplierBill>(`/supplier-bills/${id}`);
+  return mapBill(row);
+}
+
 export async function deleteSupplierBill(id: string): Promise<void> {
   await accountsApi.delete(`/supplier-bills/${id}`);
 }

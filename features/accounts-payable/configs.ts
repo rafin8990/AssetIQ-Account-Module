@@ -143,4 +143,10 @@ export const supplierBillsConfig: CrudPageConfig = {
     },
   ],
   initialRows: [],
+  extraActions: [
+    {
+      label: "View",
+      href: (row) => `/accounts-payable/supplier-bills/${row.id}`,
+    },
+  ],
 };

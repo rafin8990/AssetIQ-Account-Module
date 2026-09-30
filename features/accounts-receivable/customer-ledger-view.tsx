@@ -93,7 +93,10 @@ function buildLedger(invoices: CustomerInvoice[]): LedgerRow[] {
       (sum, payment) => sum + payment.amount,
       0
     );
-    const remainder = Math.max(invoice.paid - linkedPaid, 0);
+    const remainder = Math.max(
+      Math.min(invoice.paid, invoice.amount) - linkedPaid,
+      0
+    );
     if (remainder > 0.0001) {
       events.push({
         id: `${invoice.id}-legacy-pay`,

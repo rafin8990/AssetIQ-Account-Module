@@ -1,8 +1,6 @@
 "use client";
 
 import {
-  ArrowDownRight,
-  ArrowUpRight,
   Banknote,
   Building2,
   CircleDollarSign,
@@ -13,8 +11,6 @@ import {
   Wallet,
   type LucideIcon,
 } from "lucide-react";
-
-import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 
@@ -67,10 +63,8 @@ export function DashboardKpis({
     <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
       {metrics.map((metric) => {
         const Icon = iconMap[metric.key];
-        const isProfit = metric.key === "profit";
-        const isNegativeProfit = isProfit && metric.value < 0;
-        const showChange =
-          metric.key !== "receivable" && metric.key !== "payable";
+        const isStock =
+          metric.key === "receivable" || metric.key === "payable";
 
         return (
           <Card
@@ -78,7 +72,7 @@ export function DashboardKpis({
             className="border-0 bg-card/90 shadow-sm shadow-primary/5 ring-border/60 transition-all duration-300 hover:-translate-y-0.5 hover:shadow-md hover:shadow-primary/10"
           >
             <CardContent className="flex flex-col gap-3 pt-1">
-              <div className="flex items-start justify-between gap-2">
+              <div className="flex items-center gap-2">
                 <div
                   className={cn(
                     "flex size-9 items-center justify-center rounded-xl",
@@ -87,49 +81,42 @@ export function DashboardKpis({
                 >
                   <Icon className="size-4" />
                 </div>
-                {showChange ? (
-                  <Badge
-                    variant="secondary"
-                    className={cn(
-                      "gap-0.5 border-0 font-medium",
-                      metric.trend === "up"
-                        ? "bg-emerald-50 text-emerald-700"
-                        : "bg-rose-50 text-rose-700"
-                    )}
-                  >
-                    {metric.trend === "up" ? (
-                      <ArrowUpRight className="size-3" />
-                    ) : (
-                      <ArrowDownRight className="size-3" />
-                    )}
-                    {Math.abs(metric.change)}%
-                  </Badge>
-                ) : (
-                  <Badge variant="secondary" className="border-0 font-normal">
-                    Live
-                  </Badge>
-                )}
-              </div>
-
-              <div>
                 <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
                   {metric.title}
                 </p>
-                <p
-                  className={cn(
-                    "mt-1 text-2xl font-semibold tracking-tight",
-                    isNegativeProfit && "text-rose-600",
-                    isProfit && !isNegativeProfit && "text-emerald-700"
-                  )}
-                >
-                  {metric.key === "profit" && metric.value > 0 ? "+" : ""}
-                  {formatCurrency(metric.value)}
-                </p>
-                <p className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
-                  <PiggyBank className="size-3 opacity-60" />
-                  {metric.hint}
-                </p>
               </div>
+
+              {isStock ? (
+                <div>
+                  <p className="text-2xl font-semibold tracking-tight tabular-nums">
+                    {formatCurrency(metric.today)}
+                  </p>
+                  <p className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
+                    <PiggyBank className="size-3 opacity-60" />
+                    {metric.hint}
+                  </p>
+                </div>
+              ) : (
+                <div>
+                  <p
+                    className={cn(
+                      "text-2xl font-semibold tracking-tight tabular-nums",
+                      metric.key === "profit" &&
+                        metric.today < 0 &&
+                        "text-rose-600",
+                      metric.key === "profit" &&
+                        metric.today > 0 &&
+                        "text-emerald-700"
+                    )}
+                  >
+                    {formatCurrency(metric.today)}
+                  </p>
+                  <p className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
+                    <PiggyBank className="size-3 opacity-60" />
+                    {metric.hint}
+                  </p>
+                </div>
+              )}
             </CardContent>
           </Card>
         );

@@ -60,6 +60,31 @@ export async function fetchProfitLoss(fromDate: string, toDate: string) {
   };
 }
 
+export type DashboardTrends = {
+  months: Array<{ month: number; income: number; expense: number }>;
+  expenses: Array<{ account: string; amount: number }>;
+};
+
+export async function fetchDashboardTrends(fromDate: string, toDate: string) {
+  const data = await accountsApi.get<DashboardTrends>(
+    "/reports/dashboard-trends",
+    {
+      params: { date_from: fromDate, date_to: toDate },
+    }
+  );
+  return {
+    months: (data.months ?? []).map((row) => ({
+      month: Number(row.month),
+      income: Number(row.income),
+      expense: Number(row.expense),
+    })),
+    expenses: (data.expenses ?? []).map((row) => ({
+      account: row.account,
+      amount: Number(row.amount),
+    })),
+  };
+}
+
 export async function fetchBalanceSheet(asOf: string) {
   const data = await accountsApi.get<{
     sections: ApiStatementSection[];

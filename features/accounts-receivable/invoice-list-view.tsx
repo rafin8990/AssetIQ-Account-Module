@@ -45,11 +45,11 @@ type InvoiceListViewProps = {
   variant: InvoiceListVariant;
 };
 
-function daysPastDue(dueDate: string) {
+function daysUntilDue(dueDate: string) {
   const due = new Date(`${dueDate}T00:00:00`).getTime();
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-  return Math.max(0, Math.floor((today.getTime() - due) / (1000 * 60 * 60 * 24)));
+  return Math.floor((due - today.getTime()) / (1000 * 60 * 60 * 24));
 }
 
 export function InvoiceListView({ variant }: InvoiceListViewProps) {
@@ -64,8 +64,8 @@ export function InvoiceListView({ variant }: InvoiceListViewProps) {
       : "Due / Overdue Invoices";
   const description =
     variant === "outstanding"
-      ? "Open order invoices with remaining balance."
-      : "Open order invoices due today or already past due (live from Accounts API).";
+      ? "Open order invoices with a remaining balance."
+      : "Open order invoices that still have a balance, including upcoming due dates.";
 
   const loadRows = useCallback(async () => {
     setLoading(true);
@@ -83,7 +83,7 @@ export function InvoiceListView({ variant }: InvoiceListViewProps) {
       const sorted =
         variant === "due-overdue"
           ? [...orderOnly].sort(
-              (a, b) => daysPastDue(b.dueDate) - daysPastDue(a.dueDate)
+              (a, b) => daysUntilDue(a.dueDate) - daysUntilDue(b.dueDate)
             )
           : orderOnly;
       setRows(sorted);
@@ -108,7 +108,7 @@ export function InvoiceListView({ variant }: InvoiceListViewProps) {
     () => rows.reduce((sum, row) => sum + row.balance, 0),
     [rows]
   );
-  const overdueCount = rows.filter((row) => row.status === "overdue").length;
+  const overdueCount = rows.filter((row) => daysUntilDue(row.dueDate) < 0).length;
   const colSpan = variant === "due-overdue" ? 10 : 9;
 
   return (
@@ -219,7 +219,7 @@ export function InvoiceListView({ variant }: InvoiceListViewProps) {
                 </TableRow>
               ) : (
                 rows.map((invoice) => {
-                  const overdueDays = daysPastDue(invoice.dueDate);
+                  const daysLeft = daysUntilDue(invoice.dueDate);
                   return (
                     <TableRow key={invoice.id}>
                       <TableCell className="pl-4 font-medium">
@@ -246,12 +246,18 @@ export function InvoiceListView({ variant }: InvoiceListViewProps) {
                             variant="secondary"
                             className={cn(
                               "border-0",
-                              overdueDays > 0
+                              daysLeft < 0
                                 ? "bg-rose-50 text-rose-700"
-                                : "bg-sky-50 text-sky-700"
+                                : daysLeft === 0
+                                  ? "bg-amber-50 text-amber-700"
+                                  : "bg-sky-50 text-sky-700"
                             )}
                           >
-                            {overdueDays > 0 ? `${overdueDays}d` : "Due soon"}
+                            {daysLeft < 0
+                              ? `${Math.abs(daysLeft)}d overdue`
+                              : daysLeft === 0
+                                ? "Due today"
+                                : `Due in ${daysLeft}d`}
                           </Badge>
                         </TableCell>
                       ) : null}

@@ -51,7 +51,7 @@ export function IncomeExpenseChart({
       <CardHeader className="border-b border-border/60 pb-4">
         <CardTitle>Monthly Income vs Expense</CardTitle>
         <CardDescription>
-          Year-to-date comparison from posted income and expense entries
+          Year-to-date comparison from approved vouchers
         </CardDescription>
       </CardHeader>
       <CardContent className="pt-4">

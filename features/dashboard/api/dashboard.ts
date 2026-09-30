@@ -8,10 +8,9 @@ import {
 } from "@/features/accounts-payable/api/supplier-bills";
 import { getCashBankBook } from "@/features/cash-bank/api/cash-bank-books";
 import { listAccounts } from "@/features/chart-of-accounts/api/accounts";
-import { fetchProfitLoss } from "@/features/reports/api/financial-reports";
-import { listExpenseEntries } from "@/features/transactions/api/expense-entries";
-import { listIncomeEntries } from "@/features/transactions/api/income-entries";
+import { fetchDashboardTrends, fetchProfitLoss } from "@/features/reports/api/financial-reports";
 import { listTransactionHistory } from "@/features/transactions/api/transaction-history";
+import { formatCurrency } from "../data";
 
 export type DashboardKpi = {
   key:
@@ -23,9 +22,8 @@ export type DashboardKpi = {
     | "receivable"
     | "payable";
   title: string;
-  value: number;
-  change: number;
-  trend: "up" | "down";
+  today: number;
+  month: number;
   hint: string;
 };
 
@@ -90,21 +88,19 @@ const EXPENSE_COLORS = [
   "oklch(0.65 0.14 25)",
 ];
 
+function localDate(date = new Date()) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
 function yearStart() {
   return `${new Date().getFullYear()}-01-01`;
 }
 
-function today() {
-  return new Date().toISOString().slice(0, 10);
-}
-
 function monthIndex(date: string) {
   return new Date(`${date.slice(0, 10)}T00:00:00`).getMonth();
-}
-
-function pctChange(current: number, previous: number) {
-  if (previous === 0) return current === 0 ? 0 : 100;
-  return Number((((current - previous) / Math.abs(previous)) * 100).toFixed(1));
 }
 
 function daysPastDue(dueDate: string) {
@@ -115,28 +111,15 @@ function daysPastDue(dueDate: string) {
 }
 
 function buildMonthlySeries(
-  incomes: { date: string; amount: number }[],
-  expenses: { date: string; amount: number }[]
+  months: Array<{ month: number; income: number; expense: number }>
 ): MonthlyPoint[] {
-  const year = new Date().getFullYear();
-  const incomeByMonth = Array(12).fill(0) as number[];
-  const expenseByMonth = Array(12).fill(0) as number[];
-
-  for (const row of incomes) {
-    if (!row.date.startsWith(String(year))) continue;
-    incomeByMonth[monthIndex(row.date)] += row.amount;
-  }
-  for (const row of expenses) {
-    if (!row.date.startsWith(String(year))) continue;
-    expenseByMonth[monthIndex(row.date)] += row.amount;
-  }
-
-  const currentMonth = new Date().getMonth();
-  return MONTHS.slice(0, currentMonth + 1).map((month, index) => ({
-    month,
-    income: incomeByMonth[index],
-    expense: expenseByMonth[index],
-  }));
+  return months
+    .filter((row) => row.month >= 1 && row.month <= 12)
+    .map((row) => ({
+      month: MONTHS[row.month - 1],
+      income: row.income,
+      expense: row.expense,
+    }));
 }
 
 function buildCashTrend(
@@ -164,10 +147,8 @@ function buildCashTrend(
 function buildExpenseSlices(
   expenses: { expenseAccount?: string; amount: number; date: string }[]
 ): ExpenseSlice[] {
-  const year = String(new Date().getFullYear());
   const map = new Map<string, number>();
   for (const entry of expenses) {
-    if (!entry.date.startsWith(year)) continue;
     const category = entry.expenseAccount?.trim() || "Other";
     map.set(category, (map.get(category) ?? 0) + entry.amount);
   }
@@ -188,7 +169,6 @@ function mapUpcomingFromInvoices(invoices: CustomerInvoice[]): DashboardPayment[
   for (const invoice of invoices) {
     if (invoice.invoiceKind === "payment" || invoice.balance <= 0) continue;
     const days = daysPastDue(invoice.dueDate);
-    if (days <= -30) continue;
     rows.push({
       id: `ar-${invoice.id}`,
       party: invoice.customer,
@@ -220,24 +200,22 @@ function mapUpcomingFromBills(bills: SupplierBill[]): DashboardPayment[] {
 }
 
 export async function loadDashboardData(): Promise<DashboardData> {
-  const fromDate = yearStart();
-  const toDate = today();
+  const toDate = localDate();
+  const yearFrom = yearStart();
 
   const [
-    profitLoss,
+    todayProfitLoss,
+    trends,
     cashAccounts,
     bankAccounts,
-    incomeEntries,
-    expenseEntries,
     history,
     invoices,
     bills,
   ] = await Promise.all([
-    fetchProfitLoss(fromDate, toDate),
+    fetchProfitLoss(toDate, toDate),
+    fetchDashboardTrends(yearFrom, toDate),
     listAccounts({ type: "cash", status: "active" }),
     listAccounts({ type: "bank", status: "active" }),
-    listIncomeEntries({ status: "posted" }),
-    listExpenseEntries({ status: "posted" }),
     listTransactionHistory({ status: "posted" }),
     listCustomerInvoices({ outstanding: true }),
     listSupplierBills({ outstanding: true }),
@@ -248,23 +226,36 @@ export async function loadDashboardData(): Promise<DashboardData> {
     moneyAccounts.map((account) =>
       getCashBankBook({
         accountId: account.id,
-        dateFrom: fromDate,
+        dateFrom: yearFrom,
         dateTo: toDate,
       })
     )
   );
 
-  const cashBalanceTyped = books
-    .filter((book) => book.account.type === "cash")
-    .reduce((sum, book) => sum + book.closingBalance, 0);
-  const bankBalanceTyped = books
-    .filter((book) => book.account.type === "bank")
-    .reduce((sum, book) => sum + book.closingBalance, 0);
+  const netBetween = (
+    typedBooks: typeof books,
+    from: string,
+    to: string
+  ) =>
+    typedBooks.reduce(
+      (sum, book) =>
+        sum +
+        book.entries.reduce((inner, entry) => {
+          if (entry.date < from || entry.date > to) return inner;
+          return inner + entry.debit - entry.credit;
+        }, 0),
+      0
+    );
 
-  const totalIncome = profitLoss.sections.find((s) => s.title === "Income")?.total ?? 0;
-  const totalExpense =
-    profitLoss.sections.find((s) => s.title === "Expenses")?.total ?? 0;
-  const netProfit = profitLoss.netAmount;
+  const cashBooks = books.filter((book) => book.account.type === "cash");
+  const bankBooks = books.filter((book) => book.account.type === "bank");
+  const cashOnHand = cashBooks.reduce((sum, book) => sum + book.closingBalance, 0);
+  const bankOnHand = bankBooks.reduce((sum, book) => sum + book.closingBalance, 0);
+
+  const sectionTotal = (
+    report: { sections: Array<{ title: string; total: number }> },
+    title: string
+  ) => report.sections.find((section) => section.title === title)?.total ?? 0;
 
   const receivable = invoices
     .filter((invoice) => invoice.invoiceKind !== "payment")
@@ -274,77 +265,58 @@ export async function loadDashboardData(): Promise<DashboardData> {
     0
   );
 
-  const monthlyIncomeExpense = buildMonthlySeries(incomeEntries, expenseEntries);
-  const last = monthlyIncomeExpense.at(-1);
-  const prev = monthlyIncomeExpense.at(-2);
-  const incomeChange = pctChange(last?.income ?? 0, prev?.income ?? 0);
-  const expenseChange = pctChange(last?.expense ?? 0, prev?.expense ?? 0);
-  const profitChange = pctChange(
-    (last?.income ?? 0) - (last?.expense ?? 0),
-    (prev?.income ?? 0) - (prev?.expense ?? 0)
-  );
-
+  const monthlyIncomeExpense = buildMonthlySeries(trends.months);
   const cashFlowTrend = buildCashTrend(books);
-  const cashTrendLast = cashFlowTrend.at(-1)?.balance ?? 0;
-  const cashTrendPrev = cashFlowTrend.at(-2)?.balance ?? cashTrendLast;
-  const liquidityChange = pctChange(cashTrendLast, cashTrendPrev);
 
   const kpis: DashboardKpi[] = [
     {
       key: "income",
       title: "Total Income",
-      value: totalIncome,
-      change: incomeChange,
-      trend: incomeChange >= 0 ? "up" : "down",
-      hint: "This fiscal year",
+      today: sectionTotal(todayProfitLoss, "Income"),
+      month: 0,
+      hint: "Posted receipts",
     },
     {
       key: "expense",
       title: "Total Expense",
-      value: totalExpense,
-      change: expenseChange,
-      trend: expenseChange >= 0 ? "up" : "down",
-      hint: "This fiscal year",
+      today: sectionTotal(todayProfitLoss, "Expenses"),
+      month: 0,
+      hint: "Posted expenses",
     },
     {
       key: "profit",
       title: "Net Profit/Loss",
-      value: netProfit,
-      change: profitChange,
-      trend: profitChange >= 0 ? "up" : "down",
+      today: todayProfitLoss.netAmount,
+      month: 0,
       hint: "Income − Expense",
     },
     {
       key: "cash",
       title: "Cash Balance",
-      value: cashBalanceTyped,
-      change: liquidityChange,
-      trend: liquidityChange >= 0 ? "up" : "down",
-      hint: "All cash accounts",
+      today: cashOnHand,
+      month: cashOnHand,
+      hint: "Cash on hand",
     },
     {
       key: "bank",
       title: "Bank Balance",
-      value: bankBalanceTyped,
-      change: liquidityChange,
-      trend: liquidityChange >= 0 ? "up" : "down",
-      hint: "All bank accounts",
+      today: netBetween(bankBooks, toDate, toDate),
+      month: 0,
+      hint: `Net movement · On hand ${formatCurrency(bankOnHand)}`,
     },
     {
       key: "receivable",
       title: "Accounts Receivable",
-      value: receivable,
-      change: 0,
-      trend: "up",
+      today: receivable,
+      month: receivable,
       hint: "Outstanding invoices",
     },
     {
       key: "payable",
       title: "Accounts Payable",
-      value: payable,
-      change: 0,
-      trend: "down",
-      hint: "Bills to settle",
+      today: payable,
+      month: payable,
+      hint: "Bills still open",
     },
   ];
 
@@ -379,7 +351,13 @@ export async function loadDashboardData(): Promise<DashboardData> {
     kpis,
     monthlyIncomeExpense,
     cashFlowTrend,
-    expenseBreakdown: buildExpenseSlices(expenseEntries),
+    expenseBreakdown: buildExpenseSlices(
+      trends.expenses.map((row) => ({
+        expenseAccount: row.account,
+        amount: row.amount,
+        date: toDate,
+      }))
+    ),
     recentTransactions,
     upcomingPayments,
   };

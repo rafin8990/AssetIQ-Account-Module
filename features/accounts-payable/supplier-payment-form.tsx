@@ -29,6 +29,7 @@ import {
   type SupplierBill,
 } from "@/features/accounts-payable/api/supplier-bills";
 import { listAccounts } from "@/features/chart-of-accounts/api/accounts";
+import { listVendors } from "@/features/accounts-payable/api/vendors";
 import { formatCurrency } from "./data";
 
 type PayAccount = {
@@ -37,8 +38,15 @@ type PayAccount = {
   type: string;
 };
 
+type VendorOption = {
+  value: string;
+  label: string;
+  code: string;
+};
+
 export function SupplierPaymentForm() {
   const [bills, setBills] = useState<SupplierBill[]>([]);
+  const [vendorOptions, setVendorOptions] = useState<VendorOption[]>([]);
   const [accounts, setAccounts] = useState<PayAccount[]>([]);
   const [vendor, setVendor] = useState("");
   const [billId, setBillId] = useState("");
@@ -58,11 +66,25 @@ export function SupplierPaymentForm() {
     setLoading(true);
     setError(null);
     try {
-      const [openBills, accountRows] = await Promise.all([
+      const [openBills, accountRows, vendorRows] = await Promise.all([
         listSupplierBills({ outstanding: true }),
         listAccounts(),
+        listVendors().catch(() => []),
       ]);
       setBills(openBills);
+      setVendorOptions(
+        vendorRows
+          .map((row) => {
+            const name = String(row.vendor_name ?? "").trim();
+            const code = String(row.vendor_code ?? "").trim();
+            return {
+              value: name || code,
+              label: code ? `${name} (${code})` : name,
+              code,
+            };
+          })
+          .filter((option) => option.value)
+      );
       setAccounts(
         accountRows
           .filter((row) => {
@@ -88,15 +110,31 @@ export function SupplierPaymentForm() {
     void loadData();
   }, [loadData]);
 
-  const vendors = useMemo(() => {
-    const names = new Set(bills.map((bill) => bill.vendor));
-    return Array.from(names).sort();
-  }, [bills]);
+  const vendorChoices = useMemo(() => {
+    if (vendorOptions.length) return vendorOptions;
+    const names = Array.from(
+      new Set(bills.map((bill) => bill.vendor).filter(Boolean))
+    ).sort();
+    return names.map((name) => ({ value: name, label: name, code: "" }));
+  }, [bills, vendorOptions]);
 
-  const openBills = useMemo(
-    () => bills.filter((bill) => (vendor ? bill.vendor === vendor : true)),
-    [bills, vendor]
-  );
+  const selectedVendor = vendorChoices.find((option) => option.value === vendor);
+
+  const openBills = useMemo(() => {
+    if (!selectedVendor) return [];
+    const selectedName = selectedVendor.value.trim().toLowerCase();
+    return bills.filter((bill) => {
+      if (bill.balance <= 0) return false;
+      if (
+        selectedVendor.code &&
+        bill.vendorCode &&
+        bill.vendorCode === selectedVendor.code
+      ) {
+        return true;
+      }
+      return bill.vendor.trim().toLowerCase() === selectedName;
+    });
+  }, [bills, selectedVendor]);
 
   const selectedBill = bills.find((bill) => bill.id === billId);
 
@@ -112,6 +150,12 @@ export function SupplierPaymentForm() {
     const paymentAmount = Number(amount);
     if (!(paymentAmount > 0)) {
       setError("Enter a valid payment amount");
+      return;
+    }
+    if (paymentAmount > selectedBill.balance + 0.0001) {
+      setError(
+        `Amount cannot be more than the due balance (${formatCurrency(selectedBill.balance)}).`
+      );
       return;
     }
     if (!payFrom) {
@@ -134,14 +178,23 @@ export function SupplierPaymentForm() {
           ? Number(expenseAccountId)
           : undefined,
       });
-      setMessage(
-        `Payment posted for ${result.bill.billNo}. Balance ${formatCurrency(result.bill.balance)}.`
-      );
-      setAmount("");
+      const stillDue = Number(result.bill.balance);
       setReference("");
       setNotes("");
-      setBillId("");
       await loadData();
+      if (stillDue > 0) {
+        setBillId(result.bill.id);
+        setAmount(String(stillDue));
+        setMessage(
+          `Paid ${formatCurrency(paymentAmount)}. ${formatCurrency(stillDue)} is still due on ${result.bill.sourcePoCode || result.bill.billNo}. The payment is also saved on the purchase order.`
+        );
+      } else {
+        setBillId("");
+        setAmount("");
+        setMessage(
+          `Paid ${formatCurrency(paymentAmount)}. ${result.bill.sourcePoCode || result.bill.billNo} is fully paid.`
+        );
+      }
     } catch (err) {
       setError(
         err instanceof Error ? err.message : "Failed to post bill payment"
@@ -159,8 +212,9 @@ export function SupplierPaymentForm() {
             Supplier Payments
           </h2>
           <p className="text-sm text-muted-foreground">
-            Pay open supplier bills from cash or bank accounts (live from
-            Accounts API).
+            Select a vendor to pay their unpaid purchase orders. You can pay
+            part of an order more than once. Each payment is saved on that
+            purchase order too.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -226,9 +280,9 @@ export function SupplierPaymentForm() {
                   <SelectValue placeholder="Select vendor" />
                 </SelectTrigger>
                 <SelectContent>
-                  {vendors.map((name) => (
-                    <SelectItem key={name} value={name}>
-                      {name}
+                  {vendorChoices.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -236,7 +290,7 @@ export function SupplierPaymentForm() {
             </div>
 
             <div className="grid gap-2">
-              <Label>Apply to bill</Label>
+              <Label>Unpaid purchase order</Label>
               <Select
                 value={billId || undefined}
                 onValueChange={(value) => {
@@ -244,16 +298,23 @@ export function SupplierPaymentForm() {
                   const bill = openBills.find((row) => row.id === value);
                   if (bill) setAmount(String(bill.balance));
                 }}
-                disabled={loading}
+                disabled={loading || !vendor}
               >
                 <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Select bill" />
+                  <SelectValue
+                    placeholder={
+                      vendor
+                        ? openBills.length
+                          ? "Select unpaid purchase order"
+                          : "No unpaid purchase orders"
+                        : "Select a vendor first"
+                    }
+                  />
                 </SelectTrigger>
                 <SelectContent>
                   {openBills.map((bill) => (
                     <SelectItem key={bill.id} value={bill.id}>
-                      {bill.billNo}
-                      {bill.sourcePoCode ? ` · ${bill.sourcePoCode}` : ""} —{" "}
+                      {bill.sourcePoCode || bill.billNo} — due{" "}
                       {formatCurrency(bill.balance)}
                     </SelectItem>
                   ))}
@@ -266,10 +327,24 @@ export function SupplierPaymentForm() {
               <Input
                 id="amount"
                 type="number"
+                min="0"
+                step="0.01"
                 className="tabular-nums"
+                placeholder={
+                  selectedBill
+                    ? `Up to ${formatCurrency(selectedBill.balance)}`
+                    : "Enter amount"
+                }
                 value={amount}
                 onChange={(e) => setAmount(e.target.value)}
+                disabled={!selectedBill || saving}
               />
+              {selectedBill ? (
+                <p className="text-xs text-muted-foreground">
+                  Due {formatCurrency(selectedBill.balance)}. Change this
+                  amount to pay part of the order now.
+                </p>
+              ) : null}
             </div>
 
             <div className="grid gap-2">

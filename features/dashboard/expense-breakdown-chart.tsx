@@ -39,14 +39,14 @@ export function ExpenseBreakdownChart({
     <Card className="border-0 bg-card/90 shadow-sm shadow-primary/5 ring-border/60">
       <CardHeader className="border-b border-border/60 pb-4">
         <CardTitle>Expense Breakdown</CardTitle>
-        <CardDescription>Share of spending by expense account</CardDescription>
+        <CardDescription>Share of approved spending by expense account</CardDescription>
       </CardHeader>
       <CardContent className="pt-4">
         {loading ? (
           <div className="h-[220px] animate-pulse rounded-xl bg-muted/40" />
         ) : data.length === 0 || total === 0 ? (
           <p className="py-16 text-center text-sm text-muted-foreground">
-            No posted expenses this year yet.
+            No approved expenses yet.
           </p>
         ) : (
           <div className="grid items-center gap-4 md:grid-cols-[1fr_auto]">

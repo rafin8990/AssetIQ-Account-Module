@@ -30,6 +30,10 @@ import {
   type CustomerInvoice,
 } from "@/features/accounts-receivable/api/customer-invoices";
 import { listAccounts } from "@/features/chart-of-accounts/api/accounts";
+import {
+  listReceiptParties,
+  type PartyOption,
+} from "@/features/parties/api/parties";
 import { formatCurrency } from "./data";
 
 type DepositAccount = {
@@ -40,6 +44,7 @@ type DepositAccount = {
 
 export function ReceivePaymentForm() {
   const [invoices, setInvoices] = useState<CustomerInvoice[]>([]);
+  const [customers, setCustomers] = useState<PartyOption[]>([]);
   const [accounts, setAccounts] = useState<DepositAccount[]>([]);
   const [customer, setCustomer] = useState("");
   const [invoiceId, setInvoiceId] = useState("");
@@ -60,11 +65,13 @@ export function ReceivePaymentForm() {
     setLoading(true);
     setError(null);
     try {
-      const [openInvoices, accountRows] = await Promise.all([
-        listCustomerInvoices({ outstanding: true }),
+      const [openInvoices, accountRows, partyRows] = await Promise.all([
+        listCustomerInvoices({ outstanding: true, invoiceKind: "order" }),
         listAccounts(),
+        listReceiptParties().catch(() => [] as PartyOption[]),
       ]);
       setInvoices(openInvoices);
+      setCustomers(partyRows);
       setAccounts(
         accountRows
           .filter((row) => {
@@ -90,18 +97,40 @@ export function ReceivePaymentForm() {
     void loadData();
   }, [loadData]);
 
-  const customers = useMemo(() => {
-    const names = new Set(invoices.map((invoice) => invoice.customer));
-    return Array.from(names).sort();
-  }, [invoices]);
+  const customerOptions = useMemo(() => {
+    if (customers.length) return customers;
+    const names = new Set(invoices.map((invoice) => invoice.customer).filter(Boolean));
+    return Array.from(names)
+      .sort()
+      .map((name) => ({
+        value: name,
+        label: name,
+        code: "",
+        kind: "customer" as const,
+      }));
+  }, [customers, invoices]);
 
-  const openInvoices = useMemo(
-    () =>
-      invoices.filter((invoice) =>
-        customer ? invoice.customer === customer : true
-      ),
-    [customer, invoices]
+  const selectedCustomer = customerOptions.find(
+    (option) => option.value === customer
   );
+
+  const pendingOrders = useMemo(() => {
+    if (!selectedCustomer) return [];
+    const selectedName = selectedCustomer.value.trim().toLowerCase();
+    return invoices.filter((invoice) => {
+      if (invoice.invoiceKind === "payment" || invoice.balance <= 0) {
+        return false;
+      }
+      if (
+        selectedCustomer.code &&
+        invoice.customerCode &&
+        invoice.customerCode === selectedCustomer.code
+      ) {
+        return true;
+      }
+      return invoice.customer.trim().toLowerCase() === selectedName;
+    });
+  }, [invoices, selectedCustomer]);
 
   const selectedInvoice = invoices.find((invoice) => invoice.id === invoiceId);
 
@@ -117,6 +146,12 @@ export function ReceivePaymentForm() {
     const paymentAmount = Number(amount);
     if (!(paymentAmount > 0)) {
       setError("Enter a valid payment amount");
+      return;
+    }
+    if (paymentAmount > selectedInvoice.balance + 0.0001) {
+      setError(
+        `Amount cannot be more than the due balance (${formatCurrency(selectedInvoice.balance)}). Enter a smaller amount to pay part of the order.`
+      );
       return;
     }
     if (!depositTo) {
@@ -141,17 +176,28 @@ export function ReceivePaymentForm() {
           : undefined,
       });
       const paymentInv = result.paymentInvoice;
-      setMessage(
-        paymentInv
-          ? `Payment posted. Payment invoice ${paymentInv.invoiceNo} created. Order balance ${formatCurrency(result.invoice.balance)}.`
-          : `Payment posted for ${result.invoice.invoiceNo}. Balance ${formatCurrency(result.invoice.balance)}.`
-      );
+      const stillDue = Number(result.invoice.balance);
       setPrintInvoiceNo(paymentInv?.invoiceNo ?? null);
-      setAmount("");
       setReference("");
       setNotes("");
-      setInvoiceId("");
       await loadData();
+      if (stillDue > 0) {
+        setInvoiceId(result.invoice.id);
+        setAmount(String(stillDue));
+        setMessage(
+          paymentInv
+            ? `Received ${formatCurrency(paymentAmount)}. Payment invoice ${paymentInv.invoiceNo}. ${formatCurrency(stillDue)} is still due — enter another amount to receive again.`
+            : `Received ${formatCurrency(paymentAmount)}. ${formatCurrency(stillDue)} is still due on this order. Enter another amount to receive again.`
+        );
+      } else {
+        setInvoiceId("");
+        setAmount("");
+        setMessage(
+          paymentInv
+            ? `Received ${formatCurrency(paymentAmount)}. Payment invoice ${paymentInv.invoiceNo}. This order is fully paid.`
+            : `Received ${formatCurrency(paymentAmount)}. This order is fully paid.`
+        );
+      }
     } catch (err) {
       setError(
         err instanceof Error ? err.message : "Failed to post invoice payment"
@@ -169,7 +215,9 @@ export function ReceivePaymentForm() {
             Receive Payment
           </h2>
           <p className="text-sm text-muted-foreground">
-            Apply customer payments against outstanding invoices.
+            Select a customer, then enter any amount up to the due. You can
+            receive payment more than once. Each receipt is also saved on the
+            order in AssetIQ.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -229,7 +277,7 @@ export function ReceivePaymentForm() {
           <CardHeader className="border-b border-border/60 pb-4">
             <CardTitle className="text-base">Payment details</CardTitle>
             <CardDescription>
-              Capture receipt against an open customer invoice
+              Receipt against an unpaid customer order
             </CardDescription>
           </CardHeader>
           <CardContent className="grid gap-4 pt-4 sm:grid-cols-2">
@@ -247,9 +295,9 @@ export function ReceivePaymentForm() {
                   <SelectValue placeholder="Select customer" />
                 </SelectTrigger>
                 <SelectContent>
-                  {customers.map((name) => (
-                    <SelectItem key={name} value={name}>
-                      {name}
+                  {customerOptions.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -257,27 +305,32 @@ export function ReceivePaymentForm() {
             </div>
 
             <div className="grid gap-2">
-              <Label>Apply to invoice</Label>
+              <Label>Unpaid order</Label>
               <Select
                 value={invoiceId || undefined}
                 onValueChange={(value) => {
                   setInvoiceId(value);
-                  const invoice = openInvoices.find((i) => i.id === value);
+                  const invoice = pendingOrders.find((i) => i.id === value);
                   if (invoice) setAmount(String(invoice.balance));
                 }}
-                disabled={loading}
+                disabled={loading || !customer}
               >
                 <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Select invoice" />
+                  <SelectValue
+                    placeholder={
+                      customer
+                        ? pendingOrders.length
+                          ? "Select unpaid order"
+                          : "No unpaid orders"
+                        : "Select a customer first"
+                    }
+                  />
                 </SelectTrigger>
                 <SelectContent>
-                  {openInvoices.map((invoice) => (
+                  {pendingOrders.map((invoice) => (
                     <SelectItem key={invoice.id} value={invoice.id}>
-                      {invoice.invoiceNo}
-                      {invoice.sourceOrderCode
-                        ? ` · ${invoice.sourceOrderCode}`
-                        : ""}{" "}
-                      — {formatCurrency(invoice.balance)}
+                      {invoice.sourceOrderCode || invoice.invoiceNo} — due{" "}
+                      {formatCurrency(invoice.balance)}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -289,10 +342,26 @@ export function ReceivePaymentForm() {
               <Input
                 id="amount"
                 type="number"
+                min="0"
+                step="0.01"
+                inputMode="decimal"
                 className="tabular-nums"
+                placeholder={
+                  selectedInvoice
+                    ? `Up to ${formatCurrency(selectedInvoice.balance)}`
+                    : "Enter amount"
+                }
                 value={amount}
                 onChange={(e) => setAmount(e.target.value)}
+                disabled={!selectedInvoice || saving}
               />
+              {selectedInvoice ? (
+                <p className="text-xs text-muted-foreground">
+                  Due {formatCurrency(selectedInvoice.balance)}. Change this
+                  amount to receive a smaller payment, then receive the rest
+                  later.
+                </p>
+              ) : null}
             </div>
 
             <div className="grid gap-2">
@@ -384,8 +453,12 @@ export function ReceivePaymentForm() {
 
         <Card className="border-0 bg-card/90 shadow-sm shadow-primary/5 ring-border/60">
           <CardHeader className="border-b border-border/60 pb-4">
-            <CardTitle className="text-base">Invoice summary</CardTitle>
-            <CardDescription>Selected invoice balance snapshot</CardDescription>
+            <CardTitle className="text-base">Unpaid orders</CardTitle>
+            <CardDescription>
+              {selectedCustomer
+                ? `${selectedCustomer.label} — payment still due`
+                : "Select a customer to list unpaid orders"}
+            </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4 pt-4">
             {selectedInvoice ? (
@@ -431,10 +504,37 @@ export function ReceivePaymentForm() {
             ) : (
               <p className="text-sm text-muted-foreground">
                 {loading
-                  ? "Loading outstanding invoices…"
-                  : "Select a customer and invoice to preview balances."}
+                  ? "Loading unpaid orders…"
+                  : !customer
+                    ? "Select a customer to see orders that still need payment."
+                    : pendingOrders.length
+                      ? "Select an unpaid order to preview the balance."
+                      : "This customer has no unpaid orders."}
               </p>
             )}
+            {customer && pendingOrders.length ? (
+              <ul className="space-y-2 border-t border-border/60 pt-3">
+                {pendingOrders.map((invoice) => (
+                  <li key={invoice.id}>
+                    <button
+                      type="button"
+                      className="flex w-full items-center justify-between gap-3 rounded-lg px-2 py-2 text-left text-sm hover:bg-muted/60"
+                      onClick={() => {
+                        setInvoiceId(invoice.id);
+                        setAmount(String(invoice.balance));
+                      }}
+                    >
+                      <span className="font-medium">
+                        {invoice.sourceOrderCode || invoice.invoiceNo}
+                      </span>
+                      <span className="tabular-nums text-muted-foreground">
+                        {formatCurrency(invoice.balance)}
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
           </CardContent>
         </Card>
       </div>

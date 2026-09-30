@@ -623,7 +623,7 @@ export function IncomeEntryView() {
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex flex-wrap justify-end gap-1">
-                        {entry.status === "draft" ? (
+                        {entry.status === "draft" && entry.source !== "order" ? (
                           <Button
                             size="sm"
                             variant="outline"
